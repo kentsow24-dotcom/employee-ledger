@@ -1,0 +1,4537 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>员工花名册</title>
+<script src="https://cdn.jsdelivr.net/npm/react@18/umd/react.production.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/react-dom@18/umd/react-dom.production.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/@babel/standalone/babel.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js"></script>
+<!-- Firebase SDK -->
+<script src="https://www.gstatic.com/firebasejs/10.12.0/firebase-app-compat.js"></script>
+<script src="https://www.gstatic.com/firebasejs/10.12.0/firebase-database-compat.js"></script>
+<style>
+*{box-sizing:border-box;margin:0;padding:0}
+body{font-family:'Noto Sans SC',system-ui,sans-serif;background:#f5f5f5;color:#222;line-height:1.5}
+</style>
+</head>
+<body>
+<div id="root"></div>
+<script>
+(function(){
+  // Firebase config
+  var firebaseConfig = {
+    apiKey: "AIzaSyA8HRgCPeaTGlWUS5nYNU93CCxWDqMWhMQ",
+    databaseURL: "https://myapp-c9772-default-rtdb.asia-southeast1.firebasedatabase.app",
+    projectId: "myapp-c9772"
+  };
+  
+  // Initialize Firebase
+  firebase.initializeApp(firebaseConfig);
+  var db = firebase.database();
+  var STORAGE_KEY = 'ledger-data';
+  var _fbData = null;
+  var _fbLoading = true;
+  
+  // Listen for real-time updates
+  db.ref('data/' + STORAGE_KEY).on('value', function(snapshot) {
+    var val = snapshot.val();
+    if (val) {
+      _fbData = val;
+      _fbLoading = false;
+      try { localStorage.setItem(STORAGE_KEY, JSON.stringify(val)); } catch(e){}
+      window.dispatchEvent(new Event('ledger-remote-sync'));
+    } else {
+      // First time, no data - load from localStorage
+      try {
+        var stored = localStorage.getItem(STORAGE_KEY);
+        if (stored) {
+          _fbData = JSON.parse(stored);
+          _fbLoading = false;
+        }
+      } catch(e){}
+    }
+  }, function(error) {
+    // Firebase error, fall back to localStorage
+    try {
+      var stored = localStorage.getItem(STORAGE_KEY);
+      if (stored) _fbData = JSON.parse(stored);
+    } catch(e){}
+    _fbLoading = false;
+  });
+  
+  window.storage = {
+    get: function(key) {
+      if (_fbData) return _fbData;
+      try {
+        var val = localStorage.getItem(STORAGE_KEY);
+        if (val) return JSON.parse(val);
+      } catch(e){}
+      return null;
+    },
+    set: function(key, value) {
+      // Write to localStorage first
+      try {
+        localStorage.setItem(STORAGE_KEY, JSON.stringify(value));
+      } catch(e){ return false; }
+      _fbData = value;
+      // Then sync to Firebase (real-time!)
+      try {
+        db.ref('data/' + STORAGE_KEY).set(value);
+      } catch(e){}
+      return true;
+    }
+  };
+})();
+</script>
+<script type="text/babel">
+
+
+const FONT_IMPORT_ID = "ledger-fonts";
+
+function useFonts() {
+  React.useEffect(() => {
+    if (document.getElementById(FONT_IMPORT_ID)) return;
+    const link = document.createElement("link");
+    link.id = FONT_IMPORT_ID;
+    link.rel = "stylesheet";
+    link.href =
+      "https://fonts.googleapis.com/css2?family=Noto+Serif+SC:wght@600;700;900&family=Noto+Sans+SC:wght@400;500;700&display=swap";
+    document.head.appendChild(link);
+  }, []);
+}
+
+const RESET_STYLE_ID = "ledger-reset";
+
+// Global box-sizing reset. Several containers in this app combine
+// `width: 100%` with their own `padding` (e.g. the admin panel header).
+// Without border-box, that padding is added on top of the 100% width, so
+// the element renders wider than its parent and spills past the edge of
+// the white card/page background — most visible as a few pixels (or a
+// full grid column) of content hanging off the right side on a narrow
+// (phone) screen. border-box makes width:100% always mean "100% of the
+// parent, padding included", which is what every layout here assumes.
+function useGlobalReset() {
+  React.useEffect(() => {
+    if (document.getElementById(RESET_STYLE_ID)) return;
+    const style = document.createElement("style");
+    style.id = RESET_STYLE_ID;
+    style.textContent = "*, *::before, *::after { box-sizing: border-box; }";
+    document.head.appendChild(style);
+  }, []);
+}
+
+const STORAGE_KEY = "ledger-data";
+const GROUPS = ["A组", "B组", "C组", "D组"];
+
+const DEFAULT_EMPLOYEES = [
+  { id: "emp_melvin", name: "Melvin", role: "Supervisor", status: "active", pin: "1001", group: "A组" },
+  { id: "emp_wilson", name: "Wilson", role: "Senior Waiter", status: "active", pin: "1002", group: "A组" },
+  { id: "emp_yj", name: "YJ", role: "Waiter", status: "active", pin: "1003", group: "B组" },
+  { id: "emp_kris", name: "Kris", role: "Waiter", status: "active", pin: "1004", group: "B组" },
+  { id: "emp_weijie", name: "Wei Jie", role: "Waiter", status: "active", pin: "1005", group: "B组" },
+  { id: "emp_ken", name: "Ken", role: "Waiter", status: "active", pin: "1006", group: "B组" },
+  { id: "emp_vincent", name: "Vincent", role: "Waiter", status: "active", pin: "1007", group: "C组" },
+  { id: "emp_zack", name: "Zack", role: "Waiter", status: "active", pin: "1008", group: "C组" },
+  { id: "emp_tan", name: "Tan", role: "Waiter", status: "active", pin: "1009", group: "C组" },
+  { id: "emp_shahin", name: "Shahin", role: "Waiter", status: "active", pin: "1010", group: "D组" },
+  { id: "emp_ali", name: "Ali", role: "Waiter", status: "active", pin: "1011", group: "D组" },
+  { id: "emp_limon", name: "Limon", role: "Waiter", status: "active", pin: "1012", group: "D组" },
+  { id: "emp_amin", name: "Amin", role: "Waiter", status: "active", pin: "1013", group: "D组" },
+];
+
+const todayStr = () => {
+  const d = new Date();
+  return d.toISOString().slice(0, 10);
+};
+
+const fmtMoney = (n) =>
+  "RM " + Number(n || 0).toLocaleString("zh-CN", { maximumFractionDigits: 2 });
+
+const fmtDate = (s) => {
+  const d = new Date(s + "T00:00:00");
+  if (isNaN(d.getTime())) return s;
+  return `${d.getMonth() + 1}月${d.getDate()}日`;
+};
+
+const currentYearMonth = () => new Date().toISOString().slice(0, 7);
+
+const monthLabel = (ym) => {
+  const [y, m] = ym.split("-");
+  return `${y}年${Number(m)}月`;
+};
+
+const fmtJoinDate = (s) => {
+  if (!s) return "";
+  const d = new Date(s + "T00:00:00");
+  if (isNaN(d.getTime())) return s;
+  return `${d.getFullYear()}年${d.getMonth() + 1}月${d.getDate()}日`;
+};
+
+// Formats an ISO timestamp (e.g. audit entry `at`, or the sync-status
+// indicator) as "刚刚" / "14:32" for today / "7月2日 14:32" otherwise.
+const fmtDateTime = (iso) => {
+  if (!iso) return "";
+  const d = new Date(iso);
+  if (isNaN(d.getTime())) return "";
+  const now = new Date();
+  const hh = String(d.getHours()).padStart(2, "0");
+  const mm = String(d.getMinutes()).padStart(2, "0");
+  const sameDay =
+    d.getFullYear() === now.getFullYear() &&
+    d.getMonth() === now.getMonth() &&
+    d.getDate() === now.getDate();
+  if (sameDay) {
+    const diffMs = now - d;
+    if (diffMs >= 0 && diffMs < 60000) return "刚刚";
+    return `${hh}:${mm}`;
+  }
+  return `${d.getMonth() + 1}月${d.getDate()}日 ${hh}:${mm}`;
+};
+
+function tenureLabel(joinDate) {
+  if (!joinDate) return "";
+  const start = new Date(joinDate + "T00:00:00");
+  if (isNaN(start.getTime())) return "";
+  const now = new Date();
+  let months =
+    (now.getFullYear() - start.getFullYear()) * 12 + (now.getMonth() - start.getMonth());
+  if (now.getDate() < start.getDate()) months -= 1;
+  if (months < 0) months = 0;
+  const years = Math.floor(months / 12);
+  const remMonths = months % 12;
+  if (years > 0 && remMonths > 0) return `入职${years}年${remMonths}个月`;
+  if (years > 0) return `入职${years}年`;
+  if (months === 0) return "本月入职";
+  return `入职${months}个月`;
+}
+
+// Background tint for an employee card based on probation period (3 months):
+//   - probation passed (>= 3 months): light cyan
+//   - probation not yet passed (< 3 months): light orange
+// Falls back to null (use the default card background) when there is no
+// usable join date.
+const TENURE_BG = {
+  passed: "#DFF3F0", // probation passed — light cyan
+  pending: "#FFF0D4", // probation not yet passed — light orange
+};
+
+function tenureBgColor(joinDate) {
+  if (!joinDate) return null;
+  const start = new Date(joinDate + "T00:00:00");
+  if (isNaN(start.getTime())) return null;
+  const now = new Date();
+  const days = Math.floor((now - start) / (1000 * 60 * 60 * 24));
+  if (days < 0) return null;
+  let months =
+    (now.getFullYear() - start.getFullYear()) * 12 + (now.getMonth() - start.getMonth());
+  if (now.getDate() < start.getDate()) months -= 1;
+  if (months < 0) months = 0;
+  if (months >= 3) return TENURE_BG.passed;
+  return TENURE_BG.pending;
+}
+
+// Whole months of tenure as of today (0 if joined this month, null if no
+// usable join date). Shared by anything that needs to know "how new" an
+// employee is, e.g. the <=2-month highlight in the bonus report.
+function monthsSinceJoin(joinDate) {
+  if (!joinDate) return null;
+  const start = new Date(joinDate + "T00:00:00");
+  if (isNaN(start.getTime())) return null;
+  const now = new Date();
+  if (now < start) return null;
+  let months =
+    (now.getFullYear() - start.getFullYear()) * 12 + (now.getMonth() - start.getMonth());
+  if (now.getDate() < start.getDate()) months -= 1;
+  return Math.max(0, months);
+}
+
+function isRecentHire(joinDate, maxMonths = 2) {
+  const m = monthsSinceJoin(joinDate);
+  return m !== null && m <= maxMonths;
+}
+
+// Short percentage-only label for the bonus payout coefficient, e.g. "90%"
+// -- used wherever the report should show just "分红巴仙数" without the
+// extra "（含额外红利）" annotation.
+function bonusPercentLabel(tier) {
+  return `${Math.round((tier.coefficient || 0) * 100)}%`;
+}
+
+// Record types, aligned with the KTV员工绩效奖金（Bonus）考核制度方案:
+//   迟到/早退：每次扣 2 分
+//   旷工：每次扣 15 分
+//   虚假病假：每次扣 15 分
+//   工作违规/受处罚：视情节严重程度扣 10 - 50 分（手动填写，范围校验）
+// autoDeduction === null means the deduction is entered manually; a number
+// means it is applied automatically and is not user-editable. minDeduction /
+// maxDeduction only apply when autoDeduction is null, to enforce the 10-50
+// range from the scheme.
+const LOG_TYPES = [
+  { key: "normal", label: "正常", stamp: null, autoDeduction: null },
+  {
+    key: "violation",
+    label: "工作违规/受处罚",
+    stamp: "违规",
+    autoDeduction: null,
+    minDeduction: 10,
+    maxDeduction: 50,
+  },
+  // Free-form: no min/max, so whatever number is typed in is used as-is.
+  // For anything that doesn't fit the fixed categories below or the
+  // 10-50 分 违规 scheme.
+  { key: "other", label: "其他违规（自行输入）", stamp: "违规", autoDeduction: null },
+  { key: "late", label: "迟到/早退", stamp: "迟到早退", autoDeduction: 2 },
+  { key: "sick_false", label: "虚假病假", stamp: "虚假病假", autoDeduction: 15 },
+  { key: "absent", label: "旷工", stamp: "旷工", autoDeduction: 15 },
+];
+
+const logTypeConfig = (key) => LOG_TYPES.find((t) => t.key === key) || LOG_TYPES[0];
+
+function stampLabelFor(entry) {
+  const cfg = LOG_TYPES.find((t) => t.key === entry.type);
+  return (cfg && cfg.stamp) || "违规";
+}
+
+// Validates a manually-entered deduction value against a log type's
+// min/max range (e.g. 工作违规/受处罚 must be 10-50 分 per the bonus
+// scheme). Returns an error message, or null if the value is valid.
+// Types with a fixed autoDeduction don't need validation.
+function deductionError(cfg, value) {
+  if (!cfg || cfg.autoDeduction != null) return null;
+  const n = Number(value || 0);
+  if (n <= 0) return "请填写扣分（不能为 0），否则本次违规不会扣除信用分";
+  if (cfg.minDeduction != null && n < cfg.minDeduction) {
+    return `「${cfg.label}」扣分不能少于 ${cfg.minDeduction} 分`;
+  }
+  if (cfg.maxDeduction != null && n > cfg.maxDeduction) {
+    return `「${cfg.label}」扣分不能超过 ${cfg.maxDeduction} 分`;
+  }
+  return null;
+}
+
+// Credit-score tiers: drive the name color and badge shown for each employee.
+const CREDIT_TIERS = [
+  { min: 90, key: "key", label: "重点培养员工", color: "#1E7D78" },
+  { min: 70, key: "normal", label: "普通", color: "#22221F" },
+  { min: 50, key: "restricted", label: "被限制员工", color: "#C2762A" },
+  { min: -Infinity, key: "watch", label: "被观察员工", color: "#B5402D" },
+];
+
+function creditTier(score) {
+  return CREDIT_TIERS.find((t) => score >= t.min) || CREDIT_TIERS[CREDIT_TIERS.length - 1];
+}
+
+// Bonus payout coefficient table, from the KTV员工绩效奖金（Bonus）考核制度方案:
+//   90分及以上 → 100%（当月及以上者共享奖金池余额）
+//   80-89分 → 90%　　70-79分 → 80%　　60-69分 → 70%　　50-59分 → 60%
+//   50分以下 → 0%（取消资格）
+const BONUS_TIERS = [
+  { min: 90, coefficient: 1, label: "100%（含额外红利）" },
+  { min: 80, coefficient: 0.9, label: "90%" },
+  { min: 70, coefficient: 0.8, label: "80%" },
+  { min: 60, coefficient: 0.7, label: "70%" },
+  { min: 50, coefficient: 0.6, label: "60%" },
+  { min: -Infinity, coefficient: 0, label: "0%（取消资格）" },
+];
+
+function bonusTierFor(score) {
+  return BONUS_TIERS.find((t) => score >= t.min) || BONUS_TIERS[BONUS_TIERS.length - 1];
+}
+
+// Deterministic 4-digit fallback PIN derived from an employee id, used only
+// if an employee record somehow has no explicit pin set (e.g. legacy data).
+function defaultPin(id) {
+  let h = 0;
+  for (const c of String(id)) h = (h * 31 + c.charCodeAt(0)) >>> 0;
+  return String(h % 10000).padStart(4, "0");
+}
+
+function randomPin() {
+  return String(Math.floor(Math.random() * 10000)).padStart(4, "0");
+}
+
+function effectivePin(emp) {
+  return (emp && emp.pin) || defaultPin(emp && emp.id);
+}
+
+// Controls the display order of employee cards: Supervisor first, then
+// Senior Waiter, then Waiter; any other role is placed after those, in
+// whatever order it was originally in.
+const ROLE_ORDER = ["Supervisor", "Senior Waiter", "Waiter"];
+function roleRank(role) {
+  const idx = ROLE_ORDER.indexOf((role || "").trim());
+  return idx === -1 ? ROLE_ORDER.length : idx;
+}
+
+// Shared ordering used across the employee list AND every report/export:
+// by role (Supervisor → Senior Waiter → Waiter → any other role), then by
+// join date (earliest first, employees with no join date last), then the
+// original array order as a final tie-breaker.
+function joinDateValue(emp) {
+  const t = emp && emp.joinDate ? new Date(emp.joinDate + "T00:00:00").getTime() : NaN;
+  return isNaN(t) ? Infinity : t;
+}
+
+function sortEmployeesByRole(list) {
+  return (list || [])
+    .map((e, i) => ({ e, i }))
+    .sort(
+      (a, b) =>
+        roleRank(a.e.role) - roleRank(b.e.role) ||
+        joinDateValue(a.e) - joinDateValue(b.e) ||
+        a.i - b.i
+    )
+    .map(({ e }) => e);
+}
+
+const DEFAULT_ADMIN_PASSWORD = "admin123";
+const AUTH_STORAGE_KEY = "ledger-auth";
+
+function monthlyScore(empLogs, yearMonth) {
+  const deducted = (empLogs || [])
+    .filter((l) => l.violation && l.date && l.date.slice(0, 7) === yearMonth)
+    .reduce((s, l) => s + (Number(l.deduction) || 0), 0);
+  return Math.max(0, 100 - deducted);
+}
+
+// Gathers everything needed for an employee's exportable monthly report:
+// the credit score, every deduction with its reason, and every fine with
+// its reason plus the total amount.
+function monthlyReportData(empLogs, yearMonth) {
+  const monthLogs = (empLogs || [])
+    .filter((l) => l.date && l.date.slice(0, 7) === yearMonth)
+    .slice()
+    .sort((a, b) => (a.date < b.date ? -1 : a.date > b.date ? 1 : 0));
+  const deductionItems = monthLogs.filter((l) => l.violation && Number(l.deduction) > 0);
+  const fineItems = monthLogs.filter((l) => Number(l.fine) > 0);
+  const totalDeduction = deductionItems.reduce((s, l) => s + Number(l.deduction || 0), 0);
+  const totalFine = fineItems.reduce((s, l) => s + Number(l.fine || 0), 0);
+  return {
+    deductionItems,
+    fineItems,
+    totalDeduction,
+    totalFine,
+    score: Math.max(0, 100 - totalDeduction),
+  };
+}
+
+function Stamp({ label = "违规", size = "sm" }) {
+  const dims = size === "lg" ? 56 : 38;
+  const isShort = label.length <= 2;
+  const fontSize = size === "lg" ? 13 : isShort ? 10 : 9.5;
+  return (
+    <span
+      style={{
+        display: "inline-flex",
+        alignItems: "center",
+        justifyContent: "center",
+        width: isShort ? dims : undefined,
+        minWidth: isShort ? dims : dims - 6,
+        height: dims,
+        padding: isShort ? 0 : "0 8px",
+        borderRadius: dims / 2,
+        border: `2px solid #B5402D`,
+        color: "#B5402D",
+        fontFamily: "'Noto Serif SC', serif",
+        fontWeight: 700,
+        fontSize,
+        transform: "rotate(-9deg)",
+        boxShadow: "0 0 0 2px rgba(181,64,45,0.08)",
+        letterSpacing: isShort ? 1 : 0.5,
+        whiteSpace: "nowrap",
+        flexShrink: 0,
+        userSelect: "none",
+        opacity: 0.92,
+      }}
+    >
+      {label}
+    </span>
+  );
+}
+
+function LoginScreen({ employees, adminPassword, onLogin, colors }) {
+  const [role, setRole] = React.useState("employee"); // 'admin' | 'employee'
+  const activeEmployees = employees.filter((e) => (e.status || "active") === "active");
+  const [empId, setEmpId] = React.useState(activeEmployees[0]?.id || "");
+  const [password, setPassword] = React.useState("");
+  const [operatorName, setOperatorName] = React.useState("");
+  const [error, setError] = React.useState("");
+
+  const handleSubmit = () => {
+    const entered = password.trim();
+    if (role === "admin") {
+      if (entered === adminPassword) {
+        onLogin({ role: "admin", operatorName: operatorName.trim() });
+      } else {
+        setError("管理员密码不正确");
+      }
+      return;
+    }
+    const emp = activeEmployees.find((x) => x.id === empId);
+    if (!emp) {
+      setError("请选择员工");
+      return;
+    }
+    if (entered === effectivePin(emp)) {
+      onLogin({ role: "employee", employeeId: emp.id });
+    } else {
+      setError("登录密码不正确");
+    }
+  };
+
+  const inputStyle = {
+    width: "100%",
+    padding: "10px 12px",
+    borderRadius: 8,
+    border: `1px solid ${colors.border}`,
+    fontSize: 14,
+    boxSizing: "border-box",
+    marginBottom: 12,
+    background: colors.card,
+  };
+
+  return (
+    <div
+      style={{
+        minHeight: "100vh",
+        background: colors.page,
+        display: "flex",
+        alignItems: "center",
+        justifyContent: "center",
+        fontFamily: "'Noto Sans SC', sans-serif",
+        color: colors.text,
+        padding: 16,
+      }}
+    >
+      <div
+        style={{
+          width: "100%",
+          maxWidth: 360,
+          background: colors.card,
+          borderRadius: 14,
+          padding: 26,
+          boxShadow: "0 8px 30px rgba(0,0,0,0.08)",
+        }}
+      >
+        <div
+          style={{
+            fontFamily: "'Noto Serif SC', serif",
+            fontWeight: 900,
+            fontSize: 20,
+            marginBottom: 4,
+          }}
+        >
+          员工管理登录
+        </div>
+        <div style={{ fontSize: 12.5, color: colors.sub, marginBottom: 20 }}>
+          请选择身份并输入密码
+        </div>
+
+        <div style={{ display: "flex", gap: 6, marginBottom: 16 }}>
+          {[
+            { key: "employee", label: "员工" },
+            { key: "admin", label: "管理员" },
+          ].map((r) => (
+            <button
+              type="button"
+              key={r.key}
+              onClick={() => {
+                setRole(r.key);
+                setError("");
+                setPassword("");
+              }}
+              style={{
+                flex: 1,
+                padding: "8px 0",
+                borderRadius: 8,
+                border: `1px solid ${role === r.key ? colors.navy : colors.border}`,
+                background: role === r.key ? colors.navy : colors.card,
+                color: role === r.key ? "#fff" : colors.sub,
+                fontSize: 13.5,
+                cursor: "pointer",
+              }}
+            >
+              {r.label}
+            </button>
+          ))}
+        </div>
+
+        {role === "employee" && (
+          <select
+            value={empId}
+            onChange={(e) => setEmpId(e.target.value)}
+            style={inputStyle}
+          >
+            {activeEmployees.length === 0 && <option value="">暂无在职员工</option>}
+            {activeEmployees.map((e) => (
+              <option key={e.id} value={e.id}>
+                {e.name}
+                {e.role ? `（${e.role}）` : ""}
+              </option>
+            ))}
+          </select>
+        )}
+
+        {role === "admin" && (
+          <input
+            type="text"
+            value={operatorName}
+            onChange={(e) => setOperatorName(e.target.value)}
+            onKeyDown={(e) => e.key === "Enter" && handleSubmit()}
+            placeholder="你的姓名（选填，用于操作记录）"
+            style={inputStyle}
+          />
+        )}
+
+        <input
+          type="password"
+          inputMode={role === "employee" ? "numeric" : "text"}
+          value={password}
+          onChange={(e) => setPassword(e.target.value)}
+          onKeyDown={(e) => e.key === "Enter" && handleSubmit()}
+          placeholder={role === "admin" ? "管理员密码" : "登录密码（4位数字）"}
+          style={inputStyle}
+          autoFocus
+        />
+
+        {error && (
+          <div style={{ color: colors.red, fontSize: 12.5, marginBottom: 12 }}>{error}</div>
+        )}
+
+        <button
+          onClick={handleSubmit}
+          style={{
+            width: "100%",
+            padding: "10px 0",
+            borderRadius: 8,
+            border: "none",
+            background: colors.navy,
+            color: "#fff",
+            fontSize: 14.5,
+            fontWeight: 600,
+            cursor: "pointer",
+          }}
+        >
+          登录
+        </button>
+      </div>
+    </div>
+  );
+}
+
+function EmployeeSelfView({ employee, empLogs, colors, onLogout }) {
+  const [month, setMonth] = React.useState(currentYearMonth());
+  const data = monthlyReportData(empLogs, month);
+  const tier = creditTier(data.score);
+
+  return (
+    <div
+      style={{
+        minHeight: "100vh",
+        background: colors.page,
+        fontFamily: "'Noto Sans SC', sans-serif",
+        color: colors.text,
+      }}
+    >
+      <div
+        style={{
+          background: colors.navyDark,
+          color: "#F4F1E8",
+          padding: "20px 20px 18px",
+          display: "flex",
+          justifyContent: "space-between",
+          alignItems: "flex-start",
+        }}
+      >
+        <div>
+          <h1
+            style={{
+              fontFamily: "'Noto Serif SC', serif",
+              fontWeight: 900,
+              fontSize: 22,
+              margin: 0,
+            }}
+          >
+            {employee.name}
+          </h1>
+          <div style={{ fontSize: 12.5, color: "#B8B3A2", marginTop: 4 }}>
+            {employee.role || "—"}
+            {employee.joinDate ? ` · ${tenureLabel(employee.joinDate)}` : ""}
+          </div>
+        </div>
+        <button
+          onClick={onLogout}
+          style={{
+            border: "1px solid rgba(255,255,255,0.3)",
+            background: "transparent",
+            color: "#F4F1E8",
+            fontSize: 12.5,
+            borderRadius: 8,
+            padding: "6px 12px",
+            cursor: "pointer",
+            flexShrink: 0,
+          }}
+        >
+          退出登录
+        </button>
+      </div>
+
+      <div style={{ maxWidth: 560, margin: "0 auto", padding: 16 }}>
+        <div style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: 16 }}>
+          <span style={{ fontSize: 13, color: colors.sub }}>查看月份</span>
+          <input
+            type="month"
+            value={month}
+            onChange={(e) => setMonth(e.target.value)}
+            style={{
+              padding: "7px 9px",
+              borderRadius: 7,
+              border: `1px solid ${colors.border}`,
+              fontSize: 13.5,
+              background: colors.card,
+            }}
+          />
+        </div>
+
+        <div
+          style={{
+            background: colors.card,
+            borderRadius: 12,
+            padding: 16,
+            marginBottom: 16,
+            display: "flex",
+            justifyContent: "space-between",
+            alignItems: "flex-end",
+            border: `1px solid ${colors.border}`,
+          }}
+        >
+          <div>
+            <div style={{ fontSize: 12, color: colors.sub }}>{monthLabel(month)}</div>
+            <div style={{ fontSize: 13, color: colors.sub, marginTop: 2 }}>本月信用分</div>
+          </div>
+          <div style={{ textAlign: "right" }}>
+            <div
+              style={{
+                fontSize: 30,
+                fontWeight: 900,
+                fontFamily: "'Noto Serif SC', serif",
+                color: tier.color,
+              }}
+            >
+              {data.score}
+            </div>
+            <div style={{ fontSize: 12, fontWeight: 600, color: tier.color }}>{tier.label}</div>
+          </div>
+        </div>
+
+        <div
+          style={{
+            background: colors.card,
+            borderRadius: 12,
+            padding: 16,
+            marginBottom: 16,
+            border: `1px solid ${colors.border}`,
+          }}
+        >
+          <div style={{ fontSize: 13, fontWeight: 700, marginBottom: 8 }}>
+            扣信用分记录（合计 -{data.totalDeduction} 分）
+          </div>
+          {data.deductionItems.length === 0 ? (
+            <div style={{ fontSize: 12.5, color: colors.sub }}>本月无扣分记录</div>
+          ) : (
+            <div style={{ display: "flex", flexDirection: "column" }}>
+              {data.deductionItems.map((l) => (
+                <div
+                  key={l.id}
+                  style={{
+                    display: "flex",
+                    justifyContent: "space-between",
+                    gap: 10,
+                    fontSize: 12.5,
+                    padding: "7px 0",
+                    borderBottom: `1px dashed ${colors.border}`,
+                  }}
+                >
+                  <div style={{ flex: 1, minWidth: 0 }}>
+                    <span style={{ color: colors.sub, marginRight: 8 }}>{fmtDate(l.date)}</span>
+                    <span style={{ fontWeight: 600 }}>{stampLabelFor(l)}</span>
+                    {l.note && <span style={{ color: colors.sub }}>　{l.note}</span>}
+                  </div>
+                  <div style={{ fontWeight: 700, color: colors.red, flexShrink: 0 }}>
+                    -{l.deduction}分
+                  </div>
+                </div>
+              ))}
+            </div>
+          )}
+        </div>
+
+        <div
+          style={{
+            background: colors.card,
+            borderRadius: 12,
+            padding: 16,
+            border: `1px solid ${colors.border}`,
+          }}
+        >
+          <div style={{ fontSize: 13, fontWeight: 700, marginBottom: 8 }}>
+            罚款记录（合计 {fmtMoney(data.totalFine)}）
+          </div>
+          {data.fineItems.length === 0 ? (
+            <div style={{ fontSize: 12.5, color: colors.sub }}>本月无罚款记录</div>
+          ) : (
+            <div style={{ display: "flex", flexDirection: "column" }}>
+              {data.fineItems.map((l) => (
+                <div
+                  key={l.id}
+                  style={{
+                    display: "flex",
+                    justifyContent: "space-between",
+                    gap: 10,
+                    fontSize: 12.5,
+                    padding: "7px 0",
+                    borderBottom: `1px dashed ${colors.border}`,
+                  }}
+                >
+                  <div style={{ flex: 1, minWidth: 0 }}>
+                    <span style={{ color: colors.sub, marginRight: 8 }}>{fmtDate(l.date)}</span>
+                    <span style={{ fontWeight: 600 }}>{stampLabelFor(l)}</span>
+                    {l.note && <span style={{ color: colors.sub }}>　{l.note}</span>}
+                  </div>
+                  <div style={{ fontWeight: 700, color: colors.red, flexShrink: 0 }}>
+                    {fmtMoney(l.fine)}
+                  </div>
+                </div>
+              ))}
+            </div>
+          )}
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function EmployeeLedger() {
+  useFonts();
+  useGlobalReset();
+
+  const [loaded, setLoaded] = React.useState(false);
+  const [employees, setEmployees] = React.useState([]); // [{id, name}]
+  const [logs, setLogs] = React.useState({}); // { [employeeId]: [{id,date,work,violation,note,fine}] }
+  const [selectedId, setSelectedId] = React.useState(null);
+  const [session, setSession] = React.useState(null); // null | {role:'admin', operatorName} | {role:'employee', employeeId}
+  const [adminPassword, setAdminPassword] = React.useState(DEFAULT_ADMIN_PASSWORD);
+  const [showAdminSettings, setShowAdminSettings] = React.useState(false);
+  const [groupNameInput, setGroupNameInput] = React.useState("");
+  const [editingGroupIdx, setEditingGroupIdx] = React.useState(-1);
+  const [groups, setGroups] = React.useState([...GROUPS]);
+  const [newAdminPassword, setNewAdminPassword] = React.useState("");
+  const [adminPasswordSaved, setAdminPasswordSaved] = React.useState(false);
+  const [newName, setNewName] = React.useState("");
+  const [newRole, setNewRole] = React.useState("");
+  const [newJoinDate, setNewJoinDate] = React.useState(todayStr());
+  const [newGroup, setNewGroup] = React.useState(GROUPS[0]);
+  const [error, setError] = React.useState("");
+  const [saveError, setSaveError] = React.useState(""); // surfaced near the employee add/edit UI
+  const [saving, setSaving] = React.useState(false); // true while a persist() attempt is in flight
+  const [lastSyncedAt, setLastSyncedAt] = React.useState(null); // ISO string, last time local state matched shared storage
+  const [auditLog, setAuditLog] = React.useState([]); // [{id, at, actor, action, detail}], newest first
+  const [auditOpen, setAuditOpen] = React.useState(false);
+  // Tracks the `updatedAt` of the data we currently hold, so background
+  // polling can tell whether shared storage has moved on since (someone
+  // else saved) without re-fetching on every keystroke.
+  const remoteUpdatedAtRef = React.useRef(null);
+  // True whenever this tab has a change that hasn't been confirmed saved
+  // yet — polling must never overwrite local state while this is true, or
+  // an in-progress edit could be silently discarded.
+  const hasUnsavedRef = React.useRef(false);
+  const [tab, setTab] = React.useState("active"); // 'active' | 'resigned'
+  const [selectedGroup, setSelectedGroup] = React.useState("全部"); // group filter
+  const [editingId, setEditingId] = React.useState(null);
+  const [editName, setEditName] = React.useState("");
+  const [editRole, setEditRole] = React.useState("");
+  const [editJoinDate, setEditJoinDate] = React.useState("");
+  const [editGroup, setEditGroup] = React.useState("");
+  const [editResignDate, setEditResignDate] = React.useState("");
+  const [editPin, setEditPin] = React.useState("");
+
+  const [editingLogId, setEditingLogId] = React.useState(null);
+  const [editLogForm, setEditLogForm] = React.useState({
+    date: "",
+    work: "",
+    type: "normal",
+    note: "",
+    deduction: "",
+    fine: "",
+  });
+
+  const [bonusReportOpen, setBonusReportOpen] = React.useState(false);
+  const [bonusReportMonth, setBonusReportMonth] = React.useState(currentYearMonth());
+  const [bonusPoolAmount, setBonusPoolAmount] = React.useState("");
+  const [bonusSelectedIds, setBonusSelectedIds] = React.useState([]);
+
+  // Recalculates deductions for a given month using the current LOG_TYPES
+  // auto-deduction amounts (迟到/早退 2分、虚假病假 15分、旷工 15分). This is
+  // for backfilling entries (e.g. June) that were logged before the fixed
+  // auto-deduction scheme was applied — "工作违规/受处罚" is left untouched
+  // since it's always a manual 10-50 分 judgment call, not an auto amount.
+  const [recalcMonth, setRecalcMonth] = React.useState(currentYearMonth());
+
+  const [form, setForm] = React.useState({
+    date: todayStr(),
+    work: "",
+    type: "normal",
+    note: "",
+    fine: "",
+    deduction: "",
+  });
+
+  // load
+  React.useEffect(() => {
+    (async () => {
+      let data = { employees: DEFAULT_EMPLOYEES, logs: {}, auditLog: [] };
+      let needsSeed = true;
+      try {
+        const res = await window.storage.get(STORAGE_KEY, true);
+        if (res?.value) {
+          data = JSON.parse(res.value);
+          needsSeed = false;
+        }
+      } catch (e) {
+        // no existing data, fall through to seed defaults
+      }
+      const loadedEmployees = (data.employees || []).map((e) => ({
+        ...e,
+        status: e.status || "active",
+      }));
+      setEmployees(loadedEmployees);
+      setLogs(data.logs || {});
+      setAuditLog(data.auditLog || []);
+      remoteUpdatedAtRef.current = data.updatedAt || null;
+      setLastSyncedAt(data.updatedAt || null);
+      const firstActive = loadedEmployees.find((e) => e.status === "active");
+      if (firstActive) {
+        setSelectedId(firstActive.id);
+      } else if (loadedEmployees.length > 0) {
+        setSelectedId(loadedEmployees[0].id);
+      }
+
+      // Admin password lives in its own storage key, separate from the
+      // employees/logs blob, so changing it never touches ledger data.
+      try {
+        const authRes = await window.storage.get(AUTH_STORAGE_KEY, true);
+        if (authRes?.value) {
+          const authData = JSON.parse(authRes.value);
+          setAdminPassword(authData.adminPassword || DEFAULT_ADMIN_PASSWORD);
+        } else {
+          await window.storage.set(
+            AUTH_STORAGE_KEY,
+            JSON.stringify({ adminPassword: DEFAULT_ADMIN_PASSWORD }),
+            true
+          );
+        }
+      } catch (e) {
+        try {
+          await window.storage.set(
+            AUTH_STORAGE_KEY,
+            JSON.stringify({ adminPassword: DEFAULT_ADMIN_PASSWORD }),
+            true
+          );
+        } catch (e2) {
+          // fall back to the in-memory default; admin can still change it later
+        }
+      }
+
+      setLoaded(true);
+      if (needsSeed) {
+        persist(data.employees, data.logs, data.auditLog || []);
+      }
+    })();
+  }, []);
+
+  // Cross-session sync: this artifact has no push/websocket channel, so
+  // "syncs automatically no matter who logs in" is approximated by
+  // polling shared storage periodically and whenever the tab regains
+  // focus (e.g. phone screen turned back on). It only adopts remote data
+  // when this tab has no unsaved change of its own in flight, and pauses
+  // while an edit form is open so it can never overwrite a draft.
+  React.useEffect(() => {
+    if (!loaded) return;
+    let cancelled = false;
+
+    const pollOnce = async () => {
+      if (hasUnsavedRef.current || editingId || editingLogId) return;
+      try {
+        const res = await window.storage.get(STORAGE_KEY, true);
+        if (cancelled || !res?.value) return;
+        const data = JSON.parse(res.value);
+        if (!data.updatedAt || data.updatedAt === remoteUpdatedAtRef.current) return;
+        // Re-check right before applying: a local edit may have started
+        // during the network round-trip above.
+        if (hasUnsavedRef.current || editingId || editingLogId) return;
+        remoteUpdatedAtRef.current = data.updatedAt;
+        setEmployees((data.employees || []).map((e) => ({ ...e, status: e.status || "active" })));
+        setLogs(data.logs || {});
+        setAuditLog(data.auditLog || []);
+        setLastSyncedAt(data.updatedAt);
+      } catch (e) {
+        // offline or rate-limited — silently try again next tick
+      }
+    };
+
+    const interval = setInterval(pollOnce, 20000);
+    const onVisible = () => {
+      if (document.visibilityState === "visible") pollOnce();
+    };
+    document.addEventListener("visibilitychange", onVisible);
+    window.addEventListener("focus", pollOnce);
+
+    return () => {
+      cancelled = true;
+      clearInterval(interval);
+      document.removeEventListener("visibilitychange", onVisible);
+      window.removeEventListener("focus", pollOnce);
+    };
+  }, [loaded, editingId, editingLogId]);
+
+  const persistAdminPassword = async (nextPassword) => {
+    try {
+      await window.storage.set(
+        AUTH_STORAGE_KEY,
+        JSON.stringify({ adminPassword: nextPassword }),
+        true
+      );
+      setAdminPassword(nextPassword);
+      return true;
+    } catch (e) {
+      return false;
+    }
+  };
+
+  // Writes to storage and returns true/false so callers can react to a
+  // failed save instead of assuming it always worked. Retries a few times
+  // with increasing delays before giving up, since transient failures
+  // (rate limits, a flaky connection) are the most common cause. While
+  // hasUnsavedRef is true, background polling (below) will not overwrite
+  // local state with older shared data.
+  const persist = React.useCallback(async (nextEmployees, nextLogs, nextAuditLog) => {
+    const updatedAt = new Date().toISOString();
+    const payload = JSON.stringify({
+      employees: nextEmployees,
+      logs: nextLogs,
+      auditLog: nextAuditLog,
+      updatedAt,
+    });
+    hasUnsavedRef.current = true;
+    setSaving(true);
+    const delays = [0, 600, 1500, 3000];
+    for (let attempt = 0; attempt < delays.length; attempt++) {
+      if (delays[attempt]) await new Promise((r) => setTimeout(r, delays[attempt]));
+      try {
+        await window.storage.set(STORAGE_KEY, payload, true);
+        setSaveError("");
+        setSaving(false);
+        hasUnsavedRef.current = false;
+        remoteUpdatedAtRef.current = updatedAt;
+        setLastSyncedAt(updatedAt);
+        return true;
+      } catch (e) {
+        // fall through and retry
+      }
+    }
+    setSaving(false);
+    setSaveError("保存失败，请检查网络后重试（当前修改暂时只保存在本机，尚未同步）");
+    return false;
+  }, []);
+
+  // Employees with a resignDate in the past (or today) but still marked
+  // "active" are auto-flipped to "resigned" — covers both the browser
+  // that's open when the date arrives and any other device that syncs in
+  // afterward. Skipped while an edit is open or a save is already in
+  // flight, to avoid racing with hasUnsavedRef writes.
+  React.useEffect(() => {
+    if (!loaded || editingId || editingLogId || hasUnsavedRef.current) return;
+    const today = todayStr();
+    const toResign = employees.filter(
+      (e) => (e.status || "active") === "active" && e.resignDate && e.resignDate <= today
+    );
+    if (toResign.length === 0) return;
+    const resignIds = new Set(toResign.map((e) => e.id));
+    const next = employees.map((e) =>
+      resignIds.has(e.id) ? { ...e, status: "resigned", leaveReason: e.leaveReason || "辞职" } : e
+    );
+    setEmployees(next);
+    let nextAudit = auditLog;
+    toResign.forEach((e) => {
+      nextAudit = [
+        {
+          id: "a_" + Date.now() + "_" + Math.random().toString(36).slice(2, 7),
+          at: new Date().toISOString(),
+          actor: actorLabel(),
+          action: "自动标记离职（辞职日期已到）",
+          detail: e.name,
+        },
+        ...nextAudit,
+      ].slice(0, MAX_AUDIT_ENTRIES);
+    });
+    setAuditLog(nextAudit);
+    if (resignIds.has(selectedId)) {
+      const nextActive = next.find((e) => e.status === "active");
+      setSelectedId(nextActive?.id ?? null);
+      setTab("active");
+    }
+    persist(next, logs, nextAudit);
+  }, [loaded, employees, editingId, editingLogId, selectedId, logs, auditLog, persist]);
+
+  // Manually re-attempts the most recent save. Exposed via the save-error
+  // banner so a failed write is recoverable without re-doing the edit.
+  const retrySave = async () => {
+    await persist(employees, logs, auditLog);
+  };
+
+  // Who's making this change, for the audit log. Admin logins may
+  // optionally give their name (several people can share the one admin
+  // password); falls back to a generic label if they didn't.
+  const actorLabel = () => {
+    if (session?.role === "admin") return (session.operatorName || "").trim() || "管理员";
+    if (session?.role === "employee") {
+      const emp = employees.find((e) => e.id === session.employeeId);
+      return emp ? emp.name : "员工";
+    }
+    return "系统";
+  };
+
+  // Can manage employees (add/delete): only Supervisors and admins
+  const canManageEmployees = (() => {
+    if (session?.role === 'admin') return true;
+    if (session?.role === 'employee') {
+      const emp = employees.find((e) => e.id === session.employeeId);
+      return emp && emp.role === 'Supervisor';
+    }
+    return false;
+  })();
+
+  const MAX_AUDIT_ENTRIES = 300;
+
+  // Returns a NEW audit array with one entry prepended — never mutates
+  // the array passed in, so it's safe to build off the current `auditLog`
+  // state right before calling persist().
+  const appendAudit = (action, detail) => {
+    const entry = {
+      id: "a_" + Date.now() + "_" + Math.random().toString(36).slice(2, 7),
+      at: new Date().toISOString(),
+      actor: actorLabel(),
+      action,
+      detail: detail || "",
+    };
+    return [entry, ...auditLog].slice(0, MAX_AUDIT_ENTRIES);
+  };
+
+  const addEmployee = async () => {
+    const name = newName.trim();
+    if (!name) return;
+    const id = "emp_" + Date.now();
+    const next = [
+      ...employees,
+      {
+        id,
+        name,
+        role: newRole.trim(),
+        status: "active",
+        joinDate: newJoinDate || todayStr(),
+        pin: randomPin(),
+        group: newGroup,
+      },
+    ];
+    setEmployees(next);
+    setNewName("");
+    setNewRole("");
+    setNewJoinDate(todayStr());
+    setSelectedId(id);
+    const nextAudit = appendAudit("新增员工", `${name}${newRole.trim() ? "（" + newRole.trim() + "）" : ""}`);
+    setAuditLog(nextAudit);
+    await persist(next, logs, nextAudit);
+  };
+
+  const startEdit = (emp) => {
+    setEditingId(emp.id);
+    setEditName(emp.name);
+    setEditRole(emp.role || "");
+    setEditJoinDate(emp.joinDate || "");
+    setEditGroup(emp.group || groups[0]);
+    setEditResignDate(emp.resignDate || "");
+    setEditPin(effectivePin(emp));
+  };
+
+  const cancelEdit = () => {
+    setEditingId(null);
+    setEditName("");
+    setEditRole("");
+    setEditJoinDate("");
+    setEditGroup("");
+    setEditResignDate("");
+    setEditPin("");
+  };
+
+  const saveEdit = async () => {
+    const name = editName.trim();
+    if (!name) {
+      setError("姓名不能为空");
+      return;
+    }
+    const pin = editPin.trim();
+    if (!/^\d{4}$/.test(pin)) {
+      setError("登录密码需为4位数字");
+      return;
+    }
+    setError("");
+    const before = employees.find((e) => e.id === editingId);
+    const resignDate = editResignDate || "";
+    // If a resignation date is set and it's today or already in the past,
+    // mark the employee resigned immediately instead of waiting for the
+    // next auto-check pass.
+    const autoResign = resignDate && resignDate <= todayStr();
+    const next = employees.map((e) =>
+      e.id === editingId
+        ? {
+            ...e,
+            name,
+            role: editRole.trim(),
+            joinDate: editJoinDate || "",
+            resignDate,
+            pin,
+            group: editGroup || groups[0],
+            status: autoResign ? "resigned" : e.status,
+          }
+        : e
+    );
+    setEmployees(next);
+    cancelEdit();
+    let nextAudit = auditLog;
+    if (before) {
+      const changes = [];
+      if (before.name !== name) changes.push(`姓名 ${before.name} → ${name}`);
+      if ((before.role || "") !== editRole.trim())
+        changes.push(`职位 ${before.role || "—"} → ${editRole.trim() || "—"}`);
+      if ((before.joinDate || "") !== (editJoinDate || ""))
+        changes.push(`入职日期 ${before.joinDate || "—"} → ${editJoinDate || "—"}`);
+      if ((before.resignDate || "") !== resignDate)
+        changes.push(`辞职日期 ${before.resignDate || "—"} → ${resignDate || "—"}`);
+      if (autoResign && (before.status || "active") === "active")
+        changes.push("辞职日期已到，自动标记离职");
+      if (effectivePin(before) !== pin) changes.push("登录密码已重设");
+      if ((before.group || groups[0]) !== (editGroup || groups[0]))
+        changes.push(`组别 ${before.group || groups[0]} → ${editGroup || groups[0]}`);
+      if (changes.length > 0) {
+        nextAudit = appendAudit("编辑员工资料", `${name}：${changes.join("；")}`);
+        setAuditLog(nextAudit);
+      }
+    }
+    if (autoResign && selectedId === editingId) {
+      const nextActive = next.find((e) => e.status === "active");
+      setSelectedId(nextActive?.id ?? null);
+      setTab("active");
+    }
+    await persist(next, logs, nextAudit);
+  };
+
+  const setEmployeeStatus = async (id, status, leaveReason) => {
+    const emp = employees.find((e) => e.id === id);
+    const next = employees.map((e) => {
+      if (e.id !== id) return e;
+      if (status === "resigned") {
+        return {
+          ...e,
+          status,
+          leaveReason: leaveReason || "辞职",
+          // Manual mark-as-left always stamps today as the effective leave
+          // date, even if a future resignDate was pre-set — the action is
+          // happening now, so the record should reflect that.
+          resignDate: todayStr(),
+        };
+      }
+      // Restoring to active clears the leave markers entirely.
+      return { ...e, status, leaveReason: "", resignDate: "" };
+    });
+    setEmployees(next);
+    if (status === "resigned" && selectedId === id) {
+      const nextActive = next.find((e) => e.status === "active");
+      setSelectedId(nextActive?.id ?? null);
+      setTab("active");
+    }
+    const nextAudit = appendAudit(
+      status === "resigned" ? (leaveReason === "劝退" ? "标记劝退" : "标记离职") : "恢复在职",
+      emp ? emp.name : ""
+    );
+    setAuditLog(nextAudit);
+    await persist(next, logs, nextAudit);
+  };
+
+  const deleteEmployeePermanently = async (id) => {
+    const emp = employees.find((e) => e.id === id);
+    const next = employees.filter((e) => e.id !== id);
+    const nextLogs = { ...logs };
+    delete nextLogs[id];
+    setEmployees(next);
+    setLogs(nextLogs);
+    if (selectedId === id) {
+      setSelectedId(next.find((e) => e.status === "active")?.id ?? null);
+    }
+    const nextAudit = appendAudit("永久删除员工", emp ? emp.name : "");
+    setAuditLog(nextAudit);
+    await persist(next, nextLogs, nextAudit);
+  };
+
+  const selectLogType = (key) => {
+    const cfg = logTypeConfig(key);
+    setForm((f) => ({
+      ...f,
+      type: key,
+      deduction:
+        cfg.autoDeduction != null
+          ? String(cfg.autoDeduction)
+          : f.type === key
+          ? f.deduction
+          : key === "violation"
+          ? "10"
+          : "",
+      note: f.type === key ? f.note : "",
+      fine: f.type === key ? f.fine : "",
+    }));
+  };
+
+  const addLog = () => {
+    if (!selectedId) return;
+    const cfg = logTypeConfig(form.type);
+    const isIssue = form.type !== "normal";
+    const workText = form.work.trim();
+    if (!isIssue && !workText) {
+      setError("请填写工作内容");
+      return;
+    }
+    if (isIssue && cfg.autoDeduction == null) {
+      const err = deductionError(cfg, form.deduction);
+      if (err) {
+        setError(err);
+        return;
+      }
+    }
+    if (isIssue && !form.note.trim()) {
+      setError("请填写具体原因备注，方便日后审核报告追溯");
+      return;
+    }
+    setError("");
+    const deduction = isIssue
+      ? cfg.autoDeduction != null
+        ? cfg.autoDeduction
+        : Number(form.deduction || 0)
+      : 0;
+    const entry = {
+      id: "log_" + Date.now(),
+      date: form.date || todayStr(),
+      work: workText || (isIssue ? cfg.label : ""),
+      type: form.type,
+      violation: isIssue,
+      note: isIssue ? form.note.trim() : "",
+      fine: isIssue ? Number(form.fine || 0) : 0,
+      deduction,
+    };
+    const empLogs = logs[selectedId] || [];
+    const nextLogs = { ...logs, [selectedId]: [entry, ...empLogs] };
+    setLogs(nextLogs);
+    setForm({ date: todayStr(), work: "", type: "normal", note: "", fine: "", deduction: "" });
+    const empName = employees.find((e) => e.id === selectedId)?.name || "";
+    const nextAudit = appendAudit(
+      isIssue ? "记录违规/扣分" : "记录工作日志",
+      `${empName}　${entry.date}　${cfg.label}${deduction ? `　-${deduction}分` : ""}`
+    );
+    setAuditLog(nextAudit);
+    persist(employees, nextLogs, nextAudit);
+  };
+
+  const removeLog = (logId) => {
+    if (!selectedId) return;
+    const removed = (logs[selectedId] || []).find((l) => l.id === logId);
+    const nextEmpLogs = (logs[selectedId] || []).filter((l) => l.id !== logId);
+    const nextLogs = { ...logs, [selectedId]: nextEmpLogs };
+    setLogs(nextLogs);
+    const empName = employees.find((e) => e.id === selectedId)?.name || "";
+    const nextAudit = appendAudit(
+      "删除记录",
+      `${empName}　${removed?.date || ""}　${removed ? logTypeConfig(removed.type || (removed.violation ? "violation" : "normal")).label : ""}`
+    );
+    setAuditLog(nextAudit);
+    persist(employees, nextLogs, nextAudit);
+  };
+
+  const startEditLog = (l) => {
+    setEditingLogId(l.id);
+    setEditLogForm({
+      date: l.date || todayStr(),
+      work: l.work || "",
+      type: l.type || (l.violation ? "violation" : "normal"),
+      note: l.note || "",
+      deduction: l.deduction ? String(l.deduction) : "",
+      fine: l.fine ? String(l.fine) : "",
+    });
+  };
+
+  const cancelEditLog = () => {
+    setEditingLogId(null);
+    setEditLogForm({ date: "", work: "", type: "normal", note: "", deduction: "", fine: "" });
+  };
+
+  const saveEditLog = () => {
+    if (!selectedId || !editingLogId) return;
+    const cfg = logTypeConfig(editLogForm.type);
+    const isIssue = editLogForm.type !== "normal";
+    const workText = editLogForm.work.trim();
+    if (!isIssue && !workText) {
+      setError("请填写工作内容");
+      return;
+    }
+    if (isIssue && cfg.autoDeduction == null) {
+      const err = deductionError(cfg, editLogForm.deduction);
+      if (err) {
+        setError(err);
+        return;
+      }
+    }
+    if (isIssue && !editLogForm.note.trim()) {
+      setError("请填写具体原因备注，方便日后审核报告追溯");
+      return;
+    }
+    setError("");
+    const deduction = isIssue
+      ? cfg.autoDeduction != null
+        ? cfg.autoDeduction
+        : Number(editLogForm.deduction || 0)
+      : 0;
+    const nextEmpLogs = (logs[selectedId] || []).map((l) =>
+      l.id === editingLogId
+        ? {
+            ...l,
+            date: editLogForm.date || todayStr(),
+            work: workText || (isIssue ? cfg.label : ""),
+            type: editLogForm.type,
+            violation: isIssue,
+            note: isIssue ? editLogForm.note.trim() : "",
+            fine: isIssue ? Number(editLogForm.fine || 0) : 0,
+            deduction,
+          }
+        : l
+    );
+    const nextLogs = { ...logs, [selectedId]: nextEmpLogs };
+    setLogs(nextLogs);
+    cancelEditLog();
+    const empName = employees.find((e) => e.id === selectedId)?.name || "";
+    const nextAudit = appendAudit(
+      "编辑记录",
+      `${empName}　${editLogForm.date || todayStr()}　${cfg.label}${deduction ? `　-${deduction}分` : ""}`
+    );
+    setAuditLog(nextAudit);
+    persist(employees, nextLogs, nextAudit);
+  };
+
+  // Lists every log entry in `yearMonth` whose type has a fixed
+  // auto-deduction (per LOG_TYPES) but whose stored `deduction` doesn't
+  // match that fixed amount yet -- i.e. what "按新扣分标准重算" would change.
+  const recalcDeductionsPreview = (yearMonth) => {
+    const changes = [];
+    employees.forEach((emp) => {
+      (logs[emp.id] || []).forEach((l) => {
+        if (!l.date || l.date.slice(0, 7) !== yearMonth) return;
+        const cfg = logTypeConfig(l.type || (l.violation ? "violation" : "normal"));
+        if (cfg.autoDeduction != null && Number(l.deduction || 0) !== cfg.autoDeduction) {
+          changes.push({
+            empName: emp.name,
+            date: l.date,
+            label: cfg.label,
+            from: Number(l.deduction || 0),
+            to: cfg.autoDeduction,
+          });
+        }
+      });
+    });
+    return changes;
+  };
+
+  const applyRecalcDeductions = async (yearMonth) => {
+    const nextLogs = { ...logs };
+    let count = 0;
+    employees.forEach((emp) => {
+      const empLogs = nextLogs[emp.id];
+      if (!empLogs) return;
+      nextLogs[emp.id] = empLogs.map((l) => {
+        if (!l.date || l.date.slice(0, 7) !== yearMonth) return l;
+        const cfg = logTypeConfig(l.type || (l.violation ? "violation" : "normal"));
+        if (cfg.autoDeduction != null && Number(l.deduction || 0) !== cfg.autoDeduction) {
+          count += 1;
+          return { ...l, deduction: cfg.autoDeduction };
+        }
+        return l;
+      });
+    });
+    setLogs(nextLogs);
+    const nextAudit = appendAudit("按新标准重算扣分", `${monthLabel(yearMonth)}　共调整 ${count} 条`);
+    setAuditLog(nextAudit);
+    await persist(employees, nextLogs, nextAudit);
+    return count;
+  };
+
+  const recalcDeductionsForMonth = async (yearMonth) => {
+    const changes = recalcDeductionsPreview(yearMonth);
+    if (changes.length === 0) {
+      window.alert(`${monthLabel(yearMonth)} 没有需要按新扣分标准调整的记录`);
+      return;
+    }
+    const preview = changes
+      .slice(0, 10)
+      .map((c) => `${c.empName}　${fmtDate(c.date)}　${c.label}：${c.from}分 → ${c.to}分`)
+      .join("\n");
+    const more = changes.length > 10 ? `\n……等共 ${changes.length} 条` : "";
+    const ok = window.confirm(
+      `将按新扣分标准（迟到/早退 2分、虚假病假 15分、旷工 15分）重新计算 ${monthLabel(
+        yearMonth
+      )} 的扣分，以下 ${changes.length} 条记录会被调整：\n\n${preview}${more}\n\n确认调整？`
+    );
+    if (!ok) return;
+    const count = await applyRecalcDeductions(yearMonth);
+    window.alert(`已按新标准调整 ${count} 条扣分记录`);
+  };
+
+  const statsFor = (empId) => {
+    const arr = logs[empId] || [];
+    const violations = arr.filter((l) => l.violation).length;
+    const fines = arr.reduce((s, l) => s + (Number(l.fine) || 0), 0);
+    return { count: arr.length, violations, fines };
+  };
+
+  // Same as statsFor but scoped to a single month, used for the dashboard's
+  // "总违规次数 / 总罚款金额" summary so those totals reset and refresh
+  // automatically at the start of each month.
+  const monthlyStatsFor = (empId, yearMonth) => {
+    const arr = (logs[empId] || []).filter((l) => l.date && l.date.slice(0, 7) === yearMonth);
+    const violations = arr.filter((l) => l.violation).length;
+    const fines = arr.reduce((s, l) => s + (Number(l.fine) || 0), 0);
+    return { count: arr.length, violations, fines };
+  };
+
+  const globalStats = employees.reduce(
+    (acc, e) => {
+      const s = monthlyStatsFor(e.id, currentYearMonth());
+      acc.violations += s.violations;
+      acc.fines += s.fines;
+      return acc;
+    },
+    { violations: 0, fines: 0 }
+  );
+
+  // Rows for the violation/fine section of the "员工审核报告": one row per
+  // violation entry, scoped to `empIds` (or every employee if omitted), in
+  // the given month — plus that month's totals (总违规次数 / 罚款总金额 /
+  // 扣除信用分总计).
+  const violationReportRows = (yearMonth, empIds) => {
+    const rows = [];
+    const scoped = empIds ? employees.filter((e) => empIds.includes(e.id)) : employees;
+    scoped.forEach((emp) => {
+      (logs[emp.id] || [])
+        .filter((l) => l.violation && l.date && l.date.slice(0, 7) === yearMonth)
+        .forEach((l) => {
+          rows.push({
+            id: l.id,
+            empId: emp.id,
+            empName: emp.name,
+            role: emp.role,
+            date: l.date,
+            label: stampLabelFor(l),
+            note: l.note,
+            fine: Number(l.fine) || 0,
+            deduction: Number(l.deduction) || 0,
+          });
+        });
+    });
+    rows.sort(
+      (a, b) =>
+        (a.date < b.date ? -1 : a.date > b.date ? 1 : 0) ||
+        a.empName.localeCompare(b.empName, "zh")
+    );
+    const totalViolations = rows.length;
+    const totalFine = rows.reduce((s, r) => s + r.fine, 0);
+    const totalDeduction = rows.reduce((s, r) => s + r.deduction, 0);
+    return { rows, totalViolations, totalFine, totalDeduction };
+  };
+
+  // Employees whose effective leave date (resignDate) falls inside the
+  // given month — either auto-marked when their resignDate arrived, or
+  // manually marked via "标记离职"/"标记劝退". Powers the "本月人员变动"
+  // section of the 员工审核报告 so leaves are visible in the same report
+  // as violations and bonus distribution, not just buried in the 已离职 tab.
+  const personnelChangeRows = (yearMonth) =>
+    employees
+      .filter(
+        (e) => e.status === "resigned" && e.resignDate && e.resignDate.slice(0, 7) === yearMonth
+      )
+      .map((e) => ({
+        id: e.id,
+        name: e.name,
+        role: e.role || "",
+        reason: e.leaveReason || "辞职",
+        date: e.resignDate,
+      }))
+      .sort((a, b) => (a.date < b.date ? -1 : a.date > b.date ? 1 : 0));
+
+  // Bonus distribution, per the KTV员工绩效奖金（Bonus）考核制度方案:
+  //   Bbase (人均基数) = 奖金池总额 X / 参与人数 N
+  //   Bi (个人应发基础额) = Bbase × 奖金发放系数
+  //   R (奖金池余额) = X - ΣBi
+  //   得分 ≥ 90 分者：Bonusfinal = Bbase + (R / 优秀员工人数)
+  //   得分 < 90 分者：Bonusfinal = Bi
+  const bonusReportData = (yearMonth, poolAmount, empIds) => {
+    const pool = Number(poolAmount) || 0;
+    const emps = sortEmployeesByRole(employees.filter((e) => empIds.includes(e.id)));
+    const n = emps.length;
+    const bBase = n > 0 ? pool / n : 0;
+
+    const rows = emps.map((emp) => {
+      const score = monthlyScore(logs[emp.id], yearMonth);
+      const tier = bonusTierFor(score);
+      const bi = bBase * tier.coefficient;
+      return {
+        empId: emp.id,
+        empName: emp.name,
+        role: emp.role,
+        joinDate: emp.joinDate || "",
+        deducted: score < 100,
+        isNewHire: isRecentHire(emp.joinDate, 2),
+        score,
+        tier,
+        bi,
+        isExcellent: score >= 90,
+      };
+    });
+
+    const sumBi = rows.reduce((s, r) => s + r.bi, 0);
+    const remainder = pool - sumBi;
+    const excellentCount = rows.filter((r) => r.isExcellent).length;
+    const bonusPerExcellent = excellentCount > 0 ? remainder / excellentCount : 0;
+
+    const finalRows = rows.map((r) => ({
+      ...r,
+      bonusFinal: r.isExcellent ? bBase + bonusPerExcellent : r.bi,
+    }));
+    const totalDistributed = finalRows.reduce((s, r) => s + r.bonusFinal, 0);
+
+    return {
+      rows: finalRows,
+      n,
+      pool,
+      bBase,
+      sumBi,
+      remainder,
+      excellentCount,
+      bonusPerExcellent,
+      totalDistributed,
+    };
+  };
+
+  const selectedEmployee = employees.find((e) => e.id === selectedId);
+  const selectedLogs = selectedId ? logs[selectedId] || [] : [];
+  const selectedStats = selectedId ? statsFor(selectedId) : { count: 0, violations: 0, fines: 0 };
+  const selectedMonthScore = selectedId ? monthlyScore(logs[selectedId], currentYearMonth()) : 100;
+  const selectedTier = selectedId ? creditTier(selectedMonthScore) : null;
+  const currentTypeConfig = logTypeConfig(form.type);
+
+  const escapeHtml = (s) =>
+    String(s ?? "").replace(/[&<>"']/g, (c) =>
+      ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c])
+    );
+
+  // Renders the merged "员工审核报告" as a standalone HTML section: the
+  // violation/fine detail list (scoped to the same employees selected for
+  // bonus distribution) followed by the bonus distribution breakdown.
+  const employeeReviewReportSectionHTML = (yearMonth, poolAmount, empIds) => {
+    const { rows: vRows, totalViolations, totalFine, totalDeduction } = violationReportRows(
+      yearMonth,
+      empIds
+    );
+    const changeRows = personnelChangeRows(yearMonth);
+    const violationRowsHTML =
+      vRows.length === 0
+        ? `<div class="empty">本月无违规记录</div>`
+        : `<div class="rows">
+            <div class="vgrid vgrid-head">
+              <div class="vcell">日期</div>
+              <div class="vcell vcell-wide">扣分原因</div>
+              <div class="vcell">扣分</div>
+              <div class="vcell">罚款</div>
+            </div>
+            ${vRows
+              .map(
+                (r) => `
+        <div class="vrow">
+          <div class="vrow-name">${escapeHtml(r.empName)}</div>
+          <div class="vgrid">
+            <div class="vcell">${escapeHtml(fmtDate(r.date))}</div>
+            <div class="vcell vcell-wide">${escapeHtml(r.label)}${
+                  r.note ? "：" + escapeHtml(r.note) : ""
+                }</div>
+            <div class="vcell vcell-amt">${r.deduction > 0 ? `-${r.deduction}分` : "—"}</div>
+            <div class="vcell vcell-amt">${escapeHtml(fmtMoney(r.fine))}</div>
+          </div>
+        </div>`
+              )
+              .join("")}</div>`;
+
+    const data = bonusReportData(yearMonth, poolAmount, empIds);
+    const bonusRowsHTML =
+      data.rows.length === 0
+        ? `<div class="empty">没有参与分配的员工</div>`
+        : `<div class="rows">${data.rows
+            .map(
+              (r) => `
+        <div class="row">
+          <div class="row-main">
+            <span class="row-label" style="color:${
+              r.isNewHire ? colors.deepBlue : colors.text
+            }">${escapeHtml(r.empName)}</span>
+            <span class="row-note">　${
+              r.joinDate ? escapeHtml(fmtJoinDate(r.joinDate)) : "入职日期未填写"
+            }</span>
+          </div>
+          <div class="row-amt" style="color:${r.deducted ? colors.red : colors.cyan}">${escapeHtml(
+                bonusPercentLabel(r.tier)
+              )}</div>
+        </div>`
+            )
+            .join("")}</div>`;
+
+    const changeRowsHTML =
+      changeRows.length === 0
+        ? `<div class="empty">本月无人员变动</div>`
+        : `<div class="rows">
+            <div class="vgrid vgrid-head">
+              <div class="vcell">姓名</div>
+              <div class="vcell">类型</div>
+              <div class="vcell">日期</div>
+            </div>
+            ${changeRows
+              .map(
+                (r) => `
+        <div class="vrow">
+          <div class="vgrid">
+            <div class="vcell" style="font-weight:700;color:${
+              r.reason === "劝退" ? colors.red : colors.text
+            }">${escapeHtml(r.name)}</div>
+            <div class="vcell vcell-amt" style="color:${
+              r.reason === "劝退" ? colors.red : colors.sub
+            }">${escapeHtml(r.reason)}</div>
+            <div class="vcell">${escapeHtml(fmtDate(r.date))}</div>
+          </div>
+        </div>`
+              )
+              .join("")}</div>`;
+
+    return `
+      <section class="report-section">
+        <div class="block-title">违规记录明细（共 ${totalViolations} 条）</div>
+        ${violationRowsHTML}
+        <div class="block-title" style="margin-top:14px">违规汇总</div>
+        <div class="rows">
+          <div class="row"><div class="row-main">本月总违规次数</div><div class="row-amt">${totalViolations}</div></div>
+          <div class="row"><div class="row-main">扣除信用分总计</div><div class="row-amt">-${totalDeduction}分</div></div>
+          <div class="row"><div class="row-main">罚款总金额</div><div class="row-amt">${escapeHtml(
+            fmtMoney(totalFine)
+          )}</div></div>
+        </div>
+      </section>
+      <section class="report-section">
+        <div class="block-title">本月人员变动（共 ${changeRows.length} 人）</div>
+        ${changeRowsHTML}
+      </section>
+      <section class="report-section">
+        <div class="block-title">分红巴仙数一览（共 ${data.n} 人）</div>
+        ${bonusRowsHTML}
+        <div class="block-title" style="margin-top:14px">奖金池汇总</div>
+        <div class="rows">
+          <div class="row"><div class="row-main">奖金池总额</div><div class="row-amt">${escapeHtml(
+            fmtMoney(data.pool)
+          )}</div></div>
+          <div class="row"><div class="row-main">人均基数（Bbase）</div><div class="row-amt">${escapeHtml(
+            fmtMoney(data.bBase)
+          )}</div></div>
+          <div class="row"><div class="row-main">优秀员工人数（≥90分）</div><div class="row-amt">${
+            data.excellentCount
+          }</div></div>
+          <div class="row"><div class="row-main">奖金池余额（R）</div><div class="row-amt">${escapeHtml(
+            fmtMoney(data.remainder)
+          )}</div></div>
+          <div class="row"><div class="row-main">已分配总额</div><div class="row-amt">${escapeHtml(
+            fmtMoney(data.totalDistributed)
+          )}</div></div>
+        </div>
+      </section>`;
+  };
+
+  const buildPrintDocument = (mainTitle, subtitle, sectionsHTML) => `<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8" />
+<title>${escapeHtml(mainTitle)}</title>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Noto+Serif+SC:wght@600;700;900&family=Noto+Sans+SC:wght@400;500;700&display=swap">
+<style>
+  * { box-sizing: border-box; }
+  body { font-family: 'Noto Sans SC', sans-serif; color: ${colors.text}; margin: 0; padding: 28px; }
+  .doc-title { font-family: 'Noto Serif SC', serif; font-weight: 900; font-size: 19px; text-align: center; }
+  .doc-subtitle { font-size: 12px; color: ${colors.sub}; text-align: center; margin-top: 2px; margin-bottom: 20px; }
+  .report-section { padding-bottom: 16px; margin-bottom: 18px; border-bottom: 1px solid ${colors.border}; }
+  .report-section:last-of-type { border-bottom: none; }
+  .section-head { display:flex; justify-content:space-between; align-items:flex-end; margin-bottom: 12px; }
+  .emp-name { font-size: 16px; font-weight:700; }
+  .emp-role { font-size: 12px; color: ${colors.sub}; margin-top:2px; }
+  .score-box { text-align:right; }
+  .score-label { font-size: 11px; color: ${colors.sub}; }
+  .score-value { font-family: 'Noto Serif SC', serif; font-weight: 900; font-size: 22px; }
+  .score-tier { font-size: 11px; font-weight:600; }
+  .block-title { font-size: 13px; font-weight:700; margin-bottom: 6px; }
+  .empty { font-size: 12.5px; color: ${colors.sub}; margin-bottom: 10px; }
+  .row { display:flex; justify-content:space-between; gap:10px; font-size:12.5px; padding:6px 0; border-bottom: 1px dashed ${colors.border}; }
+  .row-date { color: ${colors.sub}; margin-right:8px; }
+  .row-label { font-weight:600; }
+  .row-note { color: ${colors.sub}; }
+  .row-amt { font-weight:700; color: ${colors.red}; flex-shrink:0; white-space:nowrap; }
+  .vrow { padding: 8px 0; border-bottom: 1px dashed ${colors.border}; }
+  .vrow-name { font-weight:700; color: ${colors.red}; font-size: 12.5px; margin-bottom: 4px; }
+  .vgrid { display:flex; flex-wrap:wrap; gap: 8px; font-size: 12.5px; }
+  .vgrid-head { font-size: 11px; color: ${colors.sub}; padding-bottom: 6px; border-bottom: 1px solid ${colors.border}; margin-bottom: 2px; }
+  .vcell { flex: 1 1 60px; text-align: center; }
+  .vcell-wide { flex: 2 1 140px; text-align: center; }
+  .vcell-amt { font-weight:700; color: ${colors.red}; }
+  .footer { margin-top: 16px; font-size: 10.5px; color: ${colors.sub}; text-align:center; }
+  .toolbar { display:flex; justify-content:flex-end; margin-bottom: 16px; }
+  .toolbar button { padding: 9px 18px; border-radius: 8px; border:none; background: ${colors.navy}; color:#fff; font-size:13.5px; font-family:'Noto Sans SC', sans-serif; cursor:pointer; }
+  @media print {
+    .report-section { break-inside: avoid; page-break-inside: avoid; }
+    .no-print { display: none !important; }
+  }
+</style>
+</head>
+<body>
+  <div class="toolbar no-print">
+    <button onclick="window.print()">打印 / 导出 PDF</button>
+  </div>
+  <div class="doc-title">${escapeHtml(mainTitle)}</div>
+  <div class="doc-subtitle">${escapeHtml(subtitle)}</div>
+  ${sectionsHTML}
+  <div class="footer">生成日期：${escapeHtml(fmtJoinDate(todayStr()))}</div>
+</body>
+</html>`;
+
+  // Printing directly inside this component (window.print()) is often
+  // silently blocked in sandboxed preview environments. Instead, we open
+  // the formatted report in its own browser tab — a normal, unsandboxed
+  // top-level page — with a visible "打印 / 导出 PDF" button on it. The
+  // user triggers printing themselves from there, which is a direct,
+  // same-page user action and isn't subject to the sandbox at all.
+  const openReportInNewTab = (html) => {
+    let reportWindow = null;
+    try {
+      reportWindow = window.open("", "_blank");
+    } catch (e) {
+      reportWindow = null;
+    }
+    if (!reportWindow) {
+      window.alert(
+        '无法打开新页面（可能被浏览器拦截了弹出窗口）。请改用"下载文本"或"复制文本"，或将组件部署到独立网页后再试导出 PDF。'
+      );
+      return;
+    }
+    reportWindow.document.open();
+    reportWindow.document.write(html);
+    reportWindow.document.close();
+  };
+
+  const printEmployeeReviewReport = () => {
+    const html = buildPrintDocument(
+      "员工审核报告",
+      monthLabel(bonusReportMonth),
+      employeeReviewReportSectionHTML(bonusReportMonth, bonusPoolAmount, bonusSelectedIds)
+    );
+    openReportInNewTab(html);
+  };
+
+  const exportEmployeeReviewReportText = () => {
+    const { rows: vRows, totalViolations, totalFine, totalDeduction } = violationReportRows(
+      bonusReportMonth,
+      bonusSelectedIds
+    );
+    const lines = [`员工审核报告 - ${monthLabel(bonusReportMonth)}`, "", "【违规记录明细】"];
+    if (vRows.length === 0) {
+      lines.push("本月无违规记录");
+    } else {
+      vRows.forEach((r) => {
+        lines.push(
+          `姓名：${r.empName}${r.role ? "（" + r.role + "）" : ""} ｜ 日期：${fmtDate(r.date)} ｜ 原因：${
+            r.label
+          }${r.note ? "：" + r.note : ""}${
+            r.deduction > 0 ? ` ｜ 扣分：-${r.deduction}分` : ""
+          } ｜ 罚款：${fmtMoney(r.fine)}`
+        );
+      });
+    }
+    lines.push("");
+    lines.push(`本月总违规次数：${totalViolations}`);
+    lines.push(`扣除信用分总计：-${totalDeduction}分`);
+    lines.push(`罚款总金额：${fmtMoney(totalFine)}`);
+
+    const changeRows = personnelChangeRows(bonusReportMonth);
+    lines.push("", "【本月人员变动】");
+    if (changeRows.length === 0) {
+      lines.push("本月无人员变动");
+    } else {
+      changeRows.forEach((r) => {
+        lines.push(
+          `姓名：${r.name}${r.role ? "（" + r.role + "）" : ""} ｜ 类型：${r.reason} ｜ 日期：${fmtDate(
+            r.date
+          )}`
+        );
+      });
+    }
+
+    const data = bonusReportData(bonusReportMonth, bonusPoolAmount, bonusSelectedIds);
+    lines.push("", "【分红巴仙数一览】");
+    if (data.rows.length === 0) {
+      lines.push("没有参与分配的员工");
+    } else {
+      data.rows.forEach((r) => {
+        lines.push(
+          `姓名：${r.empName} ｜ 入职日期：${
+            r.joinDate ? fmtJoinDate(r.joinDate) : "未填写"
+          } ｜ 分红巴仙数：${bonusPercentLabel(r.tier)}`
+        );
+      });
+    }
+    lines.push("");
+    lines.push(`奖金池总额：${fmtMoney(data.pool)}　参与人数：${data.n}　人均基数：${fmtMoney(data.bBase)}`);
+    lines.push(`优秀员工人数（≥90分）：${data.excellentCount}`);
+    lines.push(`奖金池余额（R）：${fmtMoney(data.remainder)}`);
+    lines.push(`已分配总额：${fmtMoney(data.totalDistributed)}`);
+    const text = lines.join("\n");
+    downloadTextFile(text, `员工审核报告-${bonusReportMonth}.txt`);
+    // Highlight names with any violation record or a deduction this month.
+    const redNames = Array.from(
+      new Set([...vRows.map((r) => r.empName), ...data.rows.filter((r) => r.deducted).map((r) => r.empName)])
+    );
+    showTextPreview(`员工审核报告 · ${monthLabel(bonusReportMonth)}`, text, redNames);
+  };
+
+  // CSV export for the bonus report -- importable straight into Google
+  // Sheets (File > Import, or drag-and-drop onto sheets.google.com). A
+  // true one-click "export to my Google Sheets account" isn't possible
+  // from inside this artifact (it needs Google OAuth sign-in), so CSV is
+  // the practical equivalent.
+
+  const exportEmployeeReviewReportXLSX = () => {
+    // Best-effort centering: every column is centered except 姓名 (col A),
+    // which stays left-aligned on data rows. Some browser/SheetJS builds
+    // ignore cell styles on write, so this may not always take effect —
+    // if it doesn't show up after opening the file, centering still has
+    // to be applied by hand in Excel/Sheets as before.
+    const applyCenterStyle = (ws) => {
+      const range = XLSX.utils.decode_range(ws["!ref"]);
+      for (let R = range.s.r; R <= range.e.r; R++) {
+        for (let C = range.s.c; C <= range.e.c; C++) {
+          const addr = XLSX.utils.encode_cell({ r: R, c: C });
+          const cell = ws[addr];
+          if (!cell) continue;
+          const isNameCol = C === 0;
+          const isHeaderRow = R === 0;
+          cell.s = {
+            alignment: {
+              horizontal: isNameCol && !isHeaderRow ? "left" : "center",
+              vertical: "center",
+            },
+            font: isHeaderRow ? { bold: true } : undefined,
+          };
+        }
+      }
+    };
+
+    const data = bonusReportData(bonusReportMonth, bonusPoolAmount, bonusSelectedIds);
+    const header = [
+      "姓名",
+      "入职日期",
+      "本月是否有扣除",
+      "本月违规次数",
+      "扣分原因",
+      "扣信用分合计",
+      "罚款合计(RM)",
+      "本月信用分",
+      "分红巴仙数",
+    ];
+    const rows = data.rows.map((r) => {
+      const md = monthlyReportData(logs[r.empId], bonusReportMonth);
+      const reasons = md.deductionItems
+        .map((l) => {
+          const cfg = logTypeConfig(l.type || (l.violation ? "violation" : "normal"));
+          const label = cfg.label + (l.note ? "：" + l.note : "");
+          return `${fmtDate(l.date)} ${label}（-${l.deduction}分）`;
+        })
+        .join("；");
+      return [
+        r.empName,
+        r.joinDate ? fmtJoinDate(r.joinDate) : "",
+        r.deducted ? "是" : "否",
+        md.deductionItems.length,
+        reasons,
+        md.totalDeduction,
+        Number(md.totalFine.toFixed(2)),
+        r.score,
+        bonusPercentLabel(r.tier),
+      ];
+    });
+
+    const aoa = [header, ...rows];
+    const ws = XLSX.utils.aoa_to_sheet(aoa);
+    applyCenterStyle(ws);
+    ws["!cols"] = header.map((h, i) => ({
+      wch: i === 4 ? 40 : Math.max(10, h.length * 2),
+    }));
+
+    // Second sheet: employees who left (辞职/劝退) this month, so the
+    // headcount change is part of the same downloadable file instead of
+    // only visible in the 已离职 tab.
+    const changeRows = personnelChangeRows(bonusReportMonth);
+    const changeHeader = ["姓名", "职位", "类型", "日期"];
+    const changeAoa = [
+      changeHeader,
+      ...changeRows.map((r) => [r.name, r.role, r.reason, fmtDate(r.date)]),
+    ];
+    const wsChanges = XLSX.utils.aoa_to_sheet(changeAoa);
+    applyCenterStyle(wsChanges);
+    // Overlay red font on the 姓名/类型 cells of any 劝退 row, matching the
+    // red-for-劝退 convention used in the employee list and modal/PDF.
+    changeRows.forEach((r, i) => {
+      if (r.reason !== "劝退") return;
+      [0, 2].forEach((col) => {
+        const addr = XLSX.utils.encode_cell({ r: i + 1, c: col });
+        const cell = wsChanges[addr];
+        if (cell) {
+          cell.s = {
+            ...cell.s,
+            font: { ...(cell.s && cell.s.font), color: { rgb: "B5402D" }, bold: true },
+          };
+        }
+      });
+    });
+    wsChanges["!cols"] = changeHeader.map((h) => ({ wch: Math.max(10, h.length * 2) }));
+
+    const wb = XLSX.utils.book_new();
+    XLSX.utils.book_append_sheet(wb, ws, "员工审核报告");
+    XLSX.utils.book_append_sheet(wb, wsChanges, "本月人员变动");
+    XLSX.writeFile(wb, `员工审核报告-${bonusReportMonth}.xlsx`, { cellStyles: true });
+  };
+
+  const downloadTextFile = (text, filename) => {
+    try {
+      const blob = new Blob([text], { type: "text/plain;charset=utf-8" });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement("a");
+      a.href = url;
+      a.download = filename;
+      document.body.appendChild(a);
+      a.click();
+      document.body.removeChild(a);
+      URL.revokeObjectURL(url);
+    } catch (e) {
+      // Some sandboxed/preview environments silently block the synthetic
+      // click above. We don't want the export to feel like it did nothing,
+      // so the caller always also opens the on-screen text preview below.
+    }
+  };
+
+  const copyTextToClipboard = async (text) => {
+    try {
+      await navigator.clipboard.writeText(text);
+      window.alert("已复制到剪贴板");
+    } catch (e) {
+      // Clipboard API can also be blocked in sandboxed environments; the
+      // text preview panel (with a select-all-friendly textarea) is the
+      // guaranteed fallback in that case.
+      window.alert("自动复制失败，请在下方文本框中手动全选复制");
+    }
+  };
+
+  // Shown whenever a text export is triggered, so the report is always
+  // visible/copyable even if the download or clipboard APIs are blocked.
+  // redNames lists employees (by name) who have deductions this month, so
+  // the preview can highlight their "姓名：" line in red.
+  const [textPreview, setTextPreview] = React.useState({ open: false, title: "", text: "", redNames: [] });
+  const showTextPreview = (title, text, redNames = []) =>
+    setTextPreview({ open: true, title, text, redNames });
+
+  const toggleBonusSelected = (id) => {
+    setBonusSelectedIds((prev) =>
+      prev.includes(id) ? prev.filter((x) => x !== id) : [...prev, id]
+    );
+  };
+
+  const openEmployeeReviewReport = () => {
+    setBonusReportMonth(currentYearMonth());
+    setBonusPoolAmount("");
+    setBonusSelectedIds(employees.filter((e) => (e.status || "active") === "active").map((e) => e.id));
+    setBonusReportOpen(true);
+  };
+
+  const colors = {
+    page: "#F7F6F2",
+    card: "#FFFFFF",
+    border: "#E1DDD2",
+    text: "#22221F",
+    sub: "#76746B",
+    navy: "#2C3A4B",
+    navyDark: "#1E2733",
+    red: "#B5402D",
+    green: "#4C6444",
+    cyan: "#0E7C86",
+    deepBlue: "#1B3A6B",
+  };
+
+  if (!loaded) {
+    return (
+      <div
+        style={{
+          minHeight: "100vh",
+          background: colors.page,
+          display: "flex",
+          alignItems: "center",
+          justifyContent: "center",
+          fontFamily: "'Noto Sans SC', sans-serif",
+          color: colors.sub,
+        }}
+      >
+        加载中…
+      </div>
+    );
+  }
+
+  if (!session) {
+    return (
+      <LoginScreen
+        employees={employees}
+        adminPassword={adminPassword}
+        onLogin={setSession}
+        colors={colors}
+      />
+    );
+  }
+
+  if (session.role === "employee") {
+    const emp = employees.find((e) => e.id === session.employeeId);
+    if (!emp) {
+      // The employee record no longer exists (e.g. deleted) — send back to login.
+      return (
+        <LoginScreen
+          employees={employees}
+          adminPassword={adminPassword}
+          onLogin={setSession}
+          colors={colors}
+        />
+      );
+    }
+    return (
+      <EmployeeSelfView
+        employee={emp}
+        empLogs={logs[emp.id]}
+        colors={colors}
+        onLogout={() => setSession(null)}
+      />
+    );
+  }
+
+  return (
+    <div
+      style={{
+        minHeight: "100vh",
+        background: colors.page,
+        fontFamily: "'Noto Sans SC', sans-serif",
+        color: colors.text,
+      }}
+    >
+      {/* Header */}
+      <div
+        style={{
+          background: colors.navyDark,
+          color: "#F4F1E8",
+          padding: "20px 20px 18px",
+        }}
+      >
+        <div
+          style={{
+            display: "flex",
+            justifyContent: "space-between",
+            alignItems: "flex-start",
+            gap: 10,
+            flexWrap: "wrap",
+          }}
+        >
+          <div style={{ display: "flex", alignItems: "baseline", gap: 10, flexWrap: "wrap" }}>
+            <h1
+              style={{
+                fontFamily: "'Noto Serif SC', serif",
+                fontWeight: 900,
+                fontSize: 24,
+                margin: 0,
+                letterSpacing: 1,
+              }}
+            >
+              员工管理
+            </h1>
+            <span style={{ fontSize: 12, color: "#B8B3A2", letterSpacing: 1 }}>
+              工作 · 违规 · 罚款记录
+            </span>
+            <span
+              style={{
+                fontSize: 11,
+                color: saveError ? "#E8A9A0" : "#8FAF9E",
+                display: "flex",
+                alignItems: "center",
+                gap: 4,
+              }}
+            >
+              <span
+                style={{
+                  width: 6,
+                  height: 6,
+                  borderRadius: "50%",
+                  background: saveError ? "#C24A3A" : saving ? "#C9A227" : "#4C9A72",
+                  display: "inline-block",
+                }}
+              />
+              {saveError ? "未同步" : saving ? "同步中…" : lastSyncedAt ? `已同步 ${fmtDateTime(lastSyncedAt)}` : ""}
+            </span>
+          </div>
+          <div style={{ display: "flex", alignItems: "center", gap: 8, flexShrink: 0 }}>
+            <span
+              style={{
+                fontSize: 11.5,
+                color: "#B8B3A2",
+                border: "1px solid rgba(255,255,255,0.25)",
+                borderRadius: 6,
+                padding: "3px 8px",
+              }}
+            >
+              管理员模式
+            </span>
+            <button
+              onClick={() => setAuditOpen(true)}
+              style={{
+                border: "1px solid rgba(255,255,255,0.3)",
+                background: "transparent",
+                color: "#F4F1E8",
+                fontSize: 12,
+                borderRadius: 8,
+                padding: "6px 10px",
+                cursor: "pointer",
+              }}
+            >
+              操作记录
+            </button>
+            <button
+              onClick={async () => {
+                // Force a persist + trigger PubNub sync
+                const payload = JSON.stringify({
+                  employees,
+                  logs,
+                  auditLog,
+                  updatedAt: new Date().toISOString(),
+                });
+                try {
+                  await window.storage.set(STORAGE_KEY, JSON.parse(payload));
+                  // Also call global syncNow for PubNub
+                  if (window.syncNow) {
+                    window.syncNow(JSON.parse(payload));
+                  }
+                  setSaving(true);
+                  setTimeout(() => {
+                    setSaving(false);
+                    setLastSyncedAt(new Date().toISOString());
+                  }, 500);
+                } catch(e) {
+                  console.error("Sync failed:", e);
+                }
+              }}
+              style={{
+                border: "none",
+                background: saving ? "#C9A227" : "#2E7D32",
+                color: "#fff",
+                fontSize: 13,
+                fontWeight: 700,
+                borderRadius: 8,
+                padding: "8px 16px",
+                cursor: "pointer",
+                fontFamily: "'Noto Sans SC', sans-serif",
+              }}
+            >
+              {saving ? "同步中…" : "💾 储存并同步"}
+            </button>
+            <button
+              onClick={() => {
+                setShowAdminSettings((v) => !v);
+                setNewAdminPassword("");
+                setAdminPasswordSaved(false);
+              }}
+              style={{
+                border: "1px solid rgba(255,255,255,0.3)",
+                background: "transparent",
+                color: "#F4F1E8",
+                fontSize: 12,
+                borderRadius: 8,
+                padding: "6px 10px",
+                cursor: "pointer",
+              }}
+            >
+              密码设置
+            </button>
+            <button
+              onClick={() => setSession(null)}
+              style={{
+                border: "1px solid rgba(255,255,255,0.3)",
+                background: "transparent",
+                color: "#F4F1E8",
+                fontSize: 12,
+                borderRadius: 8,
+                padding: "6px 10px",
+                cursor: "pointer",
+              }}
+            >
+              退出登录
+            </button>
+          </div>
+        </div>
+
+        {showAdminSettings && (
+          <div
+            style={{
+              marginTop: 12,
+              padding: 12,
+              borderRadius: 10,
+              background: "rgba(255,255,255,0.06)",
+              display: "flex",
+              gap: 8,
+              alignItems: "center",
+              flexWrap: "wrap",
+            }}
+          >
+            <input
+              type="password"
+              value={newAdminPassword}
+              onChange={(e) => {
+                setNewAdminPassword(e.target.value);
+                setAdminPasswordSaved(false);
+              }}
+              placeholder="设置新的管理员密码"
+              style={{
+                padding: "7px 9px",
+                borderRadius: 7,
+                border: "1px solid rgba(255,255,255,0.3)",
+                background: "rgba(255,255,255,0.08)",
+                color: "#F4F1E8",
+                fontSize: 13,
+                flex: 1,
+                minWidth: 160,
+              }}
+            />
+            <button
+              onClick={async () => {
+                const pw = newAdminPassword.trim();
+                if (!pw) return;
+                const ok = await persistAdminPassword(pw);
+                setAdminPasswordSaved(ok);
+                if (ok) {
+                  setNewAdminPassword("");
+                  const nextAudit = appendAudit("修改管理员密码", "");
+                  setAuditLog(nextAudit);
+                  persist(employees, logs, nextAudit);
+                }
+              }}
+              style={{
+                border: "none",
+                borderRadius: 7,
+                padding: "7px 12px",
+                background: "#F4F1E8",
+                color: colors.navyDark,
+                fontSize: 12.5,
+                fontWeight: 600,
+                cursor: "pointer",
+              }}
+            >
+              保存
+            </button>
+            {adminPasswordSaved && (
+              <span style={{ fontSize: 12, color: "#B7D3B0" }}>已保存</span>
+            )}
+          </div>
+        )}
+
+        <div
+          style={{
+            marginTop: 12,
+            padding: 12,
+            borderRadius: 10,
+            background: "rgba(255,255,255,0.06)",
+            display: "flex",
+            flexDirection: "column",
+            gap: 8,
+          }}
+        >
+          <div style={{ fontSize: 13, fontWeight: 700, color: "#F4F1E8" }}>组管理</div>
+            <div style={{ display: "flex", gap: 6, flexWrap: "wrap" }}>
+              {groups.map((g, i) => (
+                <div
+                  key={g}
+                  style={{
+                    display: "flex",
+                    alignItems: "center",
+                    gap: 4,
+                    padding: "4px 8px",
+                    borderRadius: 6,
+                    border: "1px solid rgba(255,255,255,0.2)",
+                    background: "rgba(255,255,255,0.08)",
+                    fontSize: 12,
+                    color: "#F4F1E8",
+                  }}
+                >
+                  {editingGroupIdx === i ? (
+                    <input
+                      value={groupNameInput}
+                      onChange={(e) => setGroupNameInput(e.target.value)}
+                      onKeyDown={(e) => {
+                        if (e.key === "Enter") {
+                          const newGroups = [...groups];
+                          newGroups[i] = groupNameInput.trim() || groups[i];
+                          setGroups(newGroups);
+                          setEditingGroupIdx(-1);
+                          setGroupNameInput("");
+                        }
+                      }}
+                      autoFocus
+                      style={{
+                        width: 80,
+                        padding: "2px 6px",
+                        borderRadius: 4,
+                        border: "1px solid rgba(255,255,255,0.3)",
+                        background: "rgba(255,255,255,0.1)",
+                        color: "#F4F1E8",
+                        fontSize: 12,
+                        outline: "none",
+                      }}
+                    />
+                  ) : (
+                    <span>{g}</span>
+                  )}
+                  {editingGroupIdx !== i ? (
+                    <button
+                      onClick={() => {
+                        setEditingGroupIdx(i);
+                        setGroupNameInput(groups[i]);
+                      }}
+                      style={{
+                        border: "none",
+                        background: "transparent",
+                        color: "#F4F1E8",
+                        cursor: "pointer",
+                        fontSize: 11,
+                        padding: "0 2px",
+                        opacity: 0.7,
+                      }}
+                      title="编辑组名"
+                    >编辑</button>
+                  ) : null}
+                  <button
+                    onClick={() => {
+                      if (groups.length <= 1) return;
+                      const newGroups = groups.filter((_, idx) => idx !== i);
+                      // Reassign employees to first remaining group
+                      const reassigned = employees.map((e) =>
+                        e.group === g ? { ...e, group: newGroups[0] } : e
+                      );
+                      setEmployees(reassigned);
+                      setGroups(newGroups);
+                      const nextAudit = appendAudit("删除组", g);
+                      setAuditLog(nextAudit);
+                      persist(reassigned, logs, nextAudit);
+                    }}
+                    style={{
+                      border: "none",
+                      background: "transparent",
+                      color: "#E2A89A",
+                      cursor: "pointer",
+                      fontSize: 11,
+                      padding: "0 2px",
+                      opacity: 0.7,
+                    }}
+                    title="删除组"
+                  >×</button>
+                </div>
+              ))}
+            <div style={{ display: "flex", gap: 6 }}>
+              <input
+                value={groupNameInput}
+                onChange={(e) => setGroupNameInput(e.target.value)}
+                onKeyDown={(e) => {
+                  if (e.key === "Enter") {
+                    const name = groupNameInput.trim();
+                    if (name && !groups.includes(name)) {
+                      setGroups([...groups, name]);
+                      setGroupNameInput("");
+                    }
+                  }
+                }}
+                placeholder="新组名"
+                style={{
+                  flex: 1,
+                  padding: "5px 8px",
+                  borderRadius: 6,
+                  border: "1px solid rgba(255,255,255,0.3)",
+                  background: "rgba(255,255,255,0.08)",
+                  color: "#F4F1E8",
+                  fontSize: 12,
+                  outline: "none",
+                }}
+              />
+              <button
+                onClick={() => {
+                  const name = groupNameInput.trim();
+                  if (name && !groups.includes(name)) {
+                    setGroups([...groups, name]);
+                    setGroupNameInput("");
+                  }
+                }}
+                style={{
+                  padding: "5px 12px",
+                  borderRadius: 6,
+                  border: "none",
+                  background: "#F4F1E8",
+                  color: colors.navyDark,
+                  fontSize: 12,
+                  fontWeight: 600,
+                  cursor: "pointer",
+                }}
+              >
+                + 添加组
+              </button>
+            </div>
+          </div>
+        </div>
+
+        <div style={{ display: "flex", gap: 18, marginTop: 14, flexWrap: "wrap" }}>
+          <div>
+            <div style={{ fontSize: 11, color: "#9B9786" }}>员工人数</div>
+            <div style={{ fontSize: 18, fontWeight: 700 }}>{employees.length}</div>
+          </div>
+          <div>
+            <div style={{ fontSize: 11, color: "#9B9786" }}>本月违规次数</div>
+            <div style={{ fontSize: 18, fontWeight: 700, color: "#E2A89A" }}>
+              {globalStats.violations}
+            </div>
+          </div>
+          <div>
+            <div style={{ fontSize: 11, color: "#9B9786" }}>本月罚款金额</div>
+            <div style={{ fontSize: 18, fontWeight: 700, color: "#E2A89A" }}>
+              {fmtMoney(globalStats.fines)}
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <div
+        style={{
+          display: "flex",
+          flexDirection: "column",
+          maxWidth: 960,
+          margin: "0 auto",
+        }}
+        className="md:flex-row"
+      >
+        {/* Sidebar */}
+        <div
+          style={{
+            width: "100%",
+            maxWidth: "100%",
+            padding: 16,
+            borderBottom: `1px solid ${colors.border}`,
+          }}
+        >
+          <div style={{ display: canManageEmployees ? "flex" : "none", gap: 8, marginBottom: 14, flexWrap: "wrap" }}>
+            <input
+              value={newName}
+              onChange={(e) => setNewName(e.target.value)}
+              onKeyDown={(e) => e.key === "Enter" && addEmployee()}
+              placeholder="员工姓名"
+              style={{
+                flex: 1,
+                minWidth: 80,
+                padding: "9px 10px",
+                borderRadius: 8,
+                border: `1px solid ${colors.border}`,
+                fontSize: 14,
+                outline: "none",
+                background: colors.card,
+              }}
+            />
+            <input
+              value={newRole}
+              onChange={(e) => setNewRole(e.target.value)}
+              onKeyDown={(e) => e.key === "Enter" && addEmployee()}
+              placeholder="职位（选填）"
+              style={{
+                flex: 1,
+                minWidth: 80,
+                padding: "9px 10px",
+                borderRadius: 8,
+                border: `1px solid ${colors.border}`,
+                fontSize: 14,
+                outline: "none",
+                background: colors.card,
+              }}
+            />
+            <select
+              value={newGroup}
+              onChange={(e) => setNewGroup(e.target.value)}
+              style={{
+                padding: "9px 10px",
+                borderRadius: 8,
+                border: `1px solid ${colors.border}`,
+                fontSize: 13.5,
+                outline: "none",
+                background: colors.card,
+              }}
+            >
+              {groups.map((g) => (
+                <option key={g} value={g}>{g}</option>
+              ))}
+            </select>
+            <input
+              type="date"
+              value={newJoinDate}
+              onChange={(e) => setNewJoinDate(e.target.value)}
+              title="入职日期"
+              style={{
+                padding: "9px 10px",
+                borderRadius: 8,
+                border: `1px solid ${colors.border}`,
+                fontSize: 13.5,
+                outline: "none",
+                background: colors.card,
+              }}
+            />
+            <button
+              onClick={addEmployee}
+              style={{
+                padding: "9px 14px",
+                borderRadius: 8,
+                border: "none",
+                background: colors.navy,
+                color: "#fff",
+                fontSize: 14,
+                cursor: "pointer",
+              }}
+            >
+              添加
+            </button>
+          </div>
+
+          {saveError && (
+            <div
+              style={{
+                display: "flex",
+                alignItems: "center",
+                justifyContent: "space-between",
+                gap: 10,
+                color: "#fff",
+                background: colors.red || "#B5402D",
+                borderRadius: 8,
+                padding: "8px 10px",
+                fontSize: 12.5,
+                marginBottom: 12,
+                lineHeight: 1.5,
+              }}
+            >
+              <span>{saveError}</span>
+              <button
+                onClick={retrySave}
+                disabled={saving}
+                style={{
+                  flexShrink: 0,
+                  border: "1px solid rgba(255,255,255,0.6)",
+                  background: "transparent",
+                  color: "#fff",
+                  borderRadius: 6,
+                  padding: "4px 9px",
+                  fontSize: 12,
+                  cursor: saving ? "default" : "pointer",
+                  opacity: saving ? 0.6 : 1,
+                }}
+              >
+                {saving ? "重试中…" : "重试"}
+              </button>
+            </div>
+          )}
+
+          <div style={{ display: "flex", gap: 6, marginBottom: 8, flexWrap: "wrap" }}>
+            {[
+              { key: "全部", label: "全部" },
+              ...groups.map(g => ({ key: g, label: g })),
+            ].map((g) => {
+              const count = employees.filter((e) => (e.status || "active") === tab && (selectedGroup === "全部" || e.group === g.key)).length;
+              return (
+                <button
+                  key={g.key}
+                  onClick={() => setSelectedGroup(g.key)}
+                  style={{
+                    flex: "1 1 auto",
+                    minWidth: 60,
+                    padding: "6px 0",
+                    borderRadius: 6,
+                    border: `1px solid ${selectedGroup === g.key ? colors.navy : colors.border}`,
+                    background: selectedGroup === g.key ? colors.navy : colors.card,
+                    color: selectedGroup === g.key ? "#fff" : colors.sub,
+                    fontSize: 12,
+                    cursor: "pointer",
+                  }}
+                >
+                  {g.label} ({count})
+                </button>
+              );
+            })}
+          </div>
+          <div style={{ display: "flex", gap: 6, marginBottom: 12 }}>
+            {[
+              { key: "active", label: "在职" },
+              { key: "resigned", label: "已离职" },
+            ].map((t) => (
+              <button
+                key={t.key}
+                onClick={() => setTab(t.key)}
+                style={{
+                  flex: 1,
+                  padding: "7px 0",
+                  borderRadius: 8,
+                  border: `1px solid ${tab === t.key ? colors.navy : colors.border}`,
+                  background: tab === t.key ? colors.navy : colors.card,
+                  color: tab === t.key ? "#fff" : colors.sub,
+                  fontSize: 13,
+                  cursor: "pointer",
+                }}
+              >
+                {t.label} ({employees.filter((e) => (e.status || "active") === t.key).length})
+              </button>
+            ))}
+          </div>
+
+          <button
+            onClick={openEmployeeReviewReport}
+            style={{
+              width: "100%",
+              padding: "8px 0",
+              borderRadius: 8,
+              border: `1px solid ${colors.border}`,
+              background: colors.card,
+              color: colors.navy,
+              fontSize: 12.5,
+              fontWeight: 600,
+              cursor: "pointer",
+              marginBottom: 8,
+            }}
+          >
+            员工审核报告
+          </button>
+
+          <div
+            style={{
+              display: "flex",
+              gap: 6,
+              marginBottom: 12,
+              alignItems: "center",
+            }}
+          >
+            <input
+              type="month"
+              value={recalcMonth}
+              onChange={(e) => setRecalcMonth(e.target.value)}
+              style={{
+                flexShrink: 0,
+                padding: "7px 8px",
+                borderRadius: 7,
+                border: `1px solid ${colors.border}`,
+                fontSize: 12,
+              }}
+            />
+          </div>
+
+
+          {employees.filter((e) => (e.status || "active") === tab && (selectedGroup === "全部" || e.group === selectedGroup)).length === 0 ? (
+            <div style={{ color: colors.sub, fontSize: 13, lineHeight: 1.7 }}>
+              {tab === "active"
+                ? "还没有在职员工。请在上方输入姓名，逐个添加。"
+                : "暂无已离职的员工。"}
+            </div>
+          ) : (
+            <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
+              {(() => {
+                const sorted = sortEmployeesByRole(
+                  employees.filter((e) => (e.status || "active") === tab && (selectedGroup === "全部" || e.group === selectedGroup))
+                );
+
+                // Group consecutive employees by role so each role occupies
+                // its own block of rows: Supervisor first, then Senior
+                // Waiter, then Waiter (any other role follows after).
+                const roleGroups = [];
+                sorted.forEach((emp) => {
+                  const roleKey = (emp.role || "").trim();
+                  const last = roleGroups[roleGroups.length - 1];
+                  if (!last || last.role !== roleKey) {
+                    roleGroups.push({ role: roleKey, items: [emp] });
+                  } else {
+                    last.items.push(emp);
+                  }
+                });
+
+                // Split each role's group into rows of at most 3 cards. A
+                // role's unfinished last row is left with blank slots
+                // instead of being filled by the next role's cards, and the
+                // next role always starts on a brand-new row.
+                const rows = [];
+                roleGroups.forEach((g) => {
+                  for (let i = 0; i < g.items.length; i += 3) {
+                    rows.push(g.items.slice(i, i + 3));
+                  }
+                });
+
+                return rows.map((row, ri) => (
+                  <div
+                    key={ri}
+                    style={{
+                      display: "grid",
+                      gridTemplateColumns: "repeat(auto-fit, minmax(220px, 1fr))",
+                      gap: 8,
+                    }}
+                  >
+                    {row.map((emp) => {
+                  const s = statsFor(emp.id);
+                  const score = monthlyScore(logs[emp.id], currentYearMonth());
+                  const cardTier = tab === "active" ? creditTier(score) : null;
+                  const isActiveCard = emp.id === selectedId;
+                  const isEditing = editingId === emp.id;
+
+                  if (isEditing) {
+                    return (
+                      <div
+                        key={emp.id}
+                        style={{
+                          padding: "10px 12px",
+                          borderRadius: 10,
+                          border: `1px solid ${colors.navy}`,
+                          background: colors.card,
+                        }}
+                      >
+                        <input
+                          value={editName}
+                          onChange={(e) => setEditName(e.target.value)}
+                          placeholder="姓名"
+                          style={{
+                            width: "100%",
+                            padding: "7px 9px",
+                            borderRadius: 7,
+                            border: `1px solid ${colors.border}`,
+                            fontSize: 13.5,
+                            marginBottom: 6,
+                            boxSizing: "border-box",
+                          }}
+                        />
+                        <input
+                          value={editRole}
+                          onChange={(e) => setEditRole(e.target.value)}
+                          placeholder="职位"
+                          style={{
+                            width: "100%",
+                            padding: "7px 9px",
+                            borderRadius: 7,
+                            border: `1px solid ${colors.border}`,
+                            fontSize: 13.5,
+                            marginBottom: 6,
+                            boxSizing: "border-box",
+                          }}
+                        />
+                        <input
+                          type="date"
+                          value={editJoinDate}
+                          onChange={(e) => setEditJoinDate(e.target.value)}
+                          title="入职日期"
+                          style={{
+                            width: "100%",
+                            padding: "7px 9px",
+                            borderRadius: 7,
+                            border: `1px solid ${colors.border}`,
+                            fontSize: 13.5,
+                            marginBottom: 8,
+                            boxSizing: "border-box",
+                          }}
+                        />
+                        <select
+                          value={editGroup}
+                          onChange={(e) => setEditGroup(e.target.value)}
+                          style={{
+                            width: "100%",
+                            padding: "7px 9px",
+                            borderRadius: 7,
+                            border: `1px solid ${colors.border}`,
+                            fontSize: 13.5,
+                            marginBottom: 8,
+                            boxSizing: "border-box",
+                            background: "#fff",
+                          }}
+                        >
+                          {groups.map((g) => (
+                            <option key={g} value={g}>
+                              {g}
+                            </option>
+                          ))}
+                        </select>
+                        <div style={{ fontSize: 11, color: colors.sub, marginBottom: 3 }}>
+                          辞职日期（到当天自动标记离职，留空则不自动）
+                        </div>
+                        <input
+                          type="date"
+                          value={editResignDate}
+                          onChange={(e) => setEditResignDate(e.target.value)}
+                          title="辞职日期"
+                          style={{
+                            width: "100%",
+                            padding: "7px 9px",
+                            borderRadius: 7,
+                            border: `1px solid ${colors.border}`,
+                            fontSize: 13.5,
+                            marginBottom: 8,
+                            boxSizing: "border-box",
+                          }}
+                        />
+                        <input
+                          value={editPin}
+                          onChange={(e) =>
+                            setEditPin(e.target.value.replace(/\D/g, "").slice(0, 4))
+                          }
+                          placeholder="登录密码（4位数字）"
+                          inputMode="numeric"
+                          maxLength={4}
+                          style={{
+                            width: "100%",
+                            padding: "7px 9px",
+                            borderRadius: 7,
+                            border: `1px solid ${colors.border}`,
+                            fontSize: 13.5,
+                            marginBottom: 8,
+                            boxSizing: "border-box",
+                          }}
+                        />
+                        {error && (
+                          <div style={{ color: colors.red, fontSize: 12, marginBottom: 8 }}>
+                            {error}
+                          </div>
+                        )}
+                        <div style={{ display: "flex", gap: 6 }}>
+                          <button
+                            onClick={saveEdit}
+                            style={{
+                              flex: 1,
+                              padding: "6px 0",
+                              borderRadius: 7,
+                              border: "none",
+                              background: colors.navy,
+                              color: "#fff",
+                              fontSize: 13,
+                              cursor: "pointer",
+                            }}
+                          >
+                            保存
+                          </button>
+                          <button
+                            onClick={cancelEdit}
+                            style={{
+                              flex: 1,
+                              padding: "6px 0",
+                              borderRadius: 7,
+                              border: `1px solid ${colors.border}`,
+                              background: colors.card,
+                              color: colors.sub,
+                              fontSize: 13,
+                              cursor: "pointer",
+                            }}
+                          >
+                            取消
+                          </button>
+                        </div>
+                      </div>
+                    );
+                  }
+
+                  return (
+                    <div
+                      key={emp.id}
+                      onClick={() => setSelectedId(emp.id)}
+                      style={{
+                        cursor: "pointer",
+                        padding: "10px 12px",
+                        borderRadius: 10,
+                        border: `1px solid ${isActiveCard ? colors.navy : colors.border}`,
+                        background: emp.leaveReason === "劝退"
+                          ? "#FBE1E0"
+                          : isActiveCard
+                          ? "#EDF0F3"
+                          : tenureBgColor(emp.joinDate) || colors.card,
+                        opacity: tab === "resigned" ? 0.75 : 1,
+                      }}
+                    >
+                      <div style={{ display: "flex", justifyContent: "space-between", gap: 8 }}>
+                        <div style={{ minWidth: 0 }}>
+                          <div
+                            style={{
+                              fontWeight: 600,
+                              fontSize: 14,
+                              color: cardTier
+                                ? cardTier.color
+                                : emp.leaveReason === "劝退"
+                                ? colors.red
+                                : colors.text,
+                            }}
+                          >
+                            {emp.name}
+                            {emp.role && (
+                              <span
+                                style={{
+                                  fontSize: 11,
+                                  color: colors.sub,
+                                  fontWeight: 400,
+                                  marginLeft: 6,
+                                }}
+                              >
+                                {emp.role}
+                              </span>
+                            )}
+                          </div>
+                          {tab === "active" ? (
+                            <div
+                              style={{
+                                display: "flex",
+                                flexWrap: "wrap",
+                                gap: "4px 10px",
+                                marginTop: 4,
+                                fontSize: 11.5,
+                                color: colors.sub,
+                                alignItems: "center",
+                              }}
+                            >
+                              <span>
+                                信用分{" "}
+                                <span style={{ fontWeight: 700, color: cardTier.color }}>
+                                  {score}
+                                </span>
+                              </span>
+                              <span>违规 {s.violations}</span>
+                              {s.fines > 0 && <span>罚款 {fmtMoney(s.fines)}</span>}
+                              {emp.joinDate && (
+                                <span>
+                                  {fmtJoinDate(emp.joinDate)} · {tenureLabel(emp.joinDate)}
+                                </span>
+                              )}
+                              {emp.resignDate && (
+                                <span style={{ color: colors.red, fontWeight: 600 }}>
+                                  将于 {fmtJoinDate(emp.resignDate)} 自动离职
+                                </span>
+                              )}
+                            </div>
+                          ) : (
+                            <div style={{ fontSize: 11.5, color: colors.sub, marginTop: 4 }}>
+                              历史记录 {s.count} 条 · 违规 {s.violations}
+                              {emp.resignDate && (
+                                <span
+                                  style={{
+                                    marginLeft: 8,
+                                    fontWeight: 600,
+                                    color: emp.leaveReason === "劝退" ? colors.red : colors.sub,
+                                  }}
+                                >
+                                  {emp.leaveReason || "辞职"} · {fmtJoinDate(emp.resignDate)}
+                                </span>
+                              )}
+                            </div>
+                          )}
+                        </div>
+                        <button
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            startEdit(emp);
+                          }}
+                          style={{
+                            border: "none",
+                            background: "transparent",
+                            color: colors.sub,
+                            fontSize: 13,
+                            cursor: "pointer",
+                            padding: "2px 4px",
+                            flexShrink: 0,
+                          }}
+                          aria-label="编辑资料"
+                        >
+                          编辑
+                        </button>
+                      </div>
+                      <div style={{ display: "flex", gap: 6, marginTop: 8 }}>
+                        {tab === "active" ? (
+                          <>
+                            <button
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                setEmployeeStatus(emp.id, "resigned", "辞职");
+                              }}
+                              style={{
+                                fontSize: 11.5,
+                                border: `1px solid ${colors.border}`,
+                                background: colors.card,
+                                color: colors.sub,
+                                borderRadius: 6,
+                                padding: "4px 8px",
+                                cursor: "pointer",
+                              }}
+                            >
+                              标记离职
+                            </button>
+                            <button
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                (async () => {
+                                  const isDismissed = emp.leaveReason === "劝退";
+                                  if (isDismissed) {
+                                    setEmployeeStatus(emp.id, "active");
+                                  } else {
+                                    const next = employees.map((x) => {
+                                      if (x.id !== emp.id) return x;
+                                      return { ...x, leaveReason: "劝退" };
+                                    });
+                                    setEmployees(next);
+                                    const nextAudit = appendAudit("标记劝退", emp.name);
+                                    setAuditLog(nextAudit);
+                                    await persist(next, logs, nextAudit);
+                                  }
+                                })();
+                              }}
+                              style={{
+                                fontSize: 11.5,
+                                border: `1px solid ${emp.leaveReason === "劝退" ? colors.green : colors.red}`,
+                                background: colors.card,
+                                color: emp.leaveReason === "劝退" ? colors.green : colors.red,
+                                borderRadius: 6,
+                                padding: "4px 8px",
+                                cursor: "pointer",
+                              }}
+                            >
+                              {emp.leaveReason === "劝退" ? "取消劝退" : "标记劝退"}
+                            </button>
+                          </>
+                        ) : (
+                          <>
+                            <button
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                setEmployeeStatus(emp.id, "active");
+                              }}
+                              style={{
+                                fontSize: 11.5,
+                                border: `1px solid ${colors.green}`,
+                                background: colors.card,
+                                color: colors.green,
+                                borderRadius: 6,
+                                padding: "4px 8px",
+                                cursor: "pointer",
+                              }}
+                            >
+                              恢复在职
+                            </button>
+                            <button
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                if (
+                                  window.confirm(
+                                    `永久删除「${emp.name}」及其全部历史记录？此操作无法撤销。`
+                                  )
+                                ) {
+                                  deleteEmployeePermanently(emp.id);
+                                }
+                              }}
+                              style={{
+                                fontSize: 11.5,
+                                border: `1px solid ${colors.red}`,
+                                background: colors.card,
+                                color: colors.red,
+                                borderRadius: 6,
+                                padding: "4px 8px",
+                                cursor: "pointer",
+                              }}
+                            >
+                              永久删除
+                            </button>
+                          </>
+                        )}
+                      </div>
+                    </div>
+                  );
+                    })}
+                  </div>
+                ));
+              })()}
+            </div>
+          )}
+        </div>
+
+        {/* Main panel */}
+        <div style={{ flex: 1, padding: 16, minWidth: 0 }}>
+          {!selectedEmployee ? (
+            <div
+              style={{
+                color: colors.sub,
+                fontSize: 14,
+                padding: "40px 10px",
+                textAlign: "center",
+              }}
+            >
+              先添加并选择一位员工，开始记录工作日志吧。
+            </div>
+          ) : (
+            <>
+              <div
+                style={{
+                  display: "flex",
+                  alignItems: "center",
+                  gap: 12,
+                  marginBottom: 14,
+                  flexWrap: "wrap",
+                }}
+              >
+                <h2
+                  style={{
+                    fontFamily: "'Noto Serif SC', serif",
+                    fontSize: 20,
+                    fontWeight: 700,
+                    margin: 0,
+                    color: selectedTier ? selectedTier.color : colors.text,
+                  }}
+                >
+                  {selectedEmployee.name}
+                </h2>
+                {selectedEmployee.role && (
+                  <span style={{ fontSize: 12.5, color: colors.sub }}>{selectedEmployee.role}</span>
+                )}
+                {selectedEmployee.joinDate && (
+                  <span style={{ fontSize: 12.5, color: colors.sub }}>
+                    入职 {fmtJoinDate(selectedEmployee.joinDate)}（{tenureLabel(selectedEmployee.joinDate)}）
+                  </span>
+                )}
+                {selectedStats.violations > 0 && <Stamp size="lg" />}
+                <div style={{ marginLeft: "auto", textAlign: "right" }}>
+                  <div style={{ fontSize: 11, color: colors.sub }}>
+                    {monthLabel(currentYearMonth())}信用分
+                  </div>
+                  <div
+                    style={{
+                      fontSize: 22,
+                      fontWeight: 900,
+                      fontFamily: "'Noto Serif SC', serif",
+                      color: selectedTier.color,
+                    }}
+                  >
+                    {selectedMonthScore}
+                  </div>
+                  <div style={{ fontSize: 11, fontWeight: 600, color: selectedTier.color }}>
+                    {selectedTier.label}
+                  </div>
+                </div>
+              </div>
+              <div style={{ fontSize: 12.5, color: colors.sub, marginBottom: 14, marginTop: -10 }}>
+                共 {selectedStats.count} 条记录
+                {selectedStats.fines > 0 ? ` · 罚款合计 ${fmtMoney(selectedStats.fines)}` : ""}
+              </div>
+
+              {/* New entry form */}
+              <div
+                style={{
+                  background: colors.card,
+                  border: `1px solid ${colors.border}`,
+                  borderRadius: 12,
+                  padding: 14,
+                  marginBottom: 18,
+                }}
+              >
+                <div style={{ display: "flex", gap: 10, marginBottom: 10, flexWrap: "wrap" }}>
+                  <input
+                    type="date"
+                    value={form.date}
+                    onChange={(e) => setForm({ ...form, date: e.target.value })}
+                    style={{
+                      padding: "8px 10px",
+                      borderRadius: 8,
+                      border: `1px solid ${colors.border}`,
+                      fontSize: 13.5,
+                    }}
+                  />
+                </div>
+
+                <div style={{ display: "flex", gap: 6, marginBottom: 10, flexWrap: "wrap" }}>
+                  {LOG_TYPES.map((t) => {
+                    const active = form.type === t.key;
+                    return (
+                      <button
+                        key={t.key}
+                        type="button"
+                        onClick={() => selectLogType(t.key)}
+                        style={{
+                          padding: "6px 11px",
+                          borderRadius: 999,
+                          border: `1px solid ${active ? colors.navy : colors.border}`,
+                          background: active ? colors.navy : colors.card,
+                          color: active ? "#fff" : colors.sub,
+                          fontSize: 12.5,
+                          cursor: "pointer",
+                          whiteSpace: "nowrap",
+                        }}
+                      >
+                        {t.label}
+                        {t.autoDeduction != null ? ` -${t.autoDeduction}分` : ""}
+                      </button>
+                    );
+                  })}
+                </div>
+
+                <textarea
+                  value={form.work}
+                  onChange={(e) => setForm({ ...form, work: e.target.value })}
+                  placeholder={
+                    form.type === "normal"
+                      ? "今日工作内容…"
+                      : `工作内容（选填，留空记为「${currentTypeConfig.label}」）`
+                  }
+                  rows={2}
+                  style={{
+                    width: "100%",
+                    padding: "9px 10px",
+                    borderRadius: 8,
+                    border: `1px solid ${colors.border}`,
+                    fontSize: 14,
+                    resize: "vertical",
+                    fontFamily: "inherit",
+                    boxSizing: "border-box",
+                  }}
+                />
+
+                {form.type !== "normal" && (
+                  <div
+                    style={{
+                      marginTop: 10,
+                      padding: 10,
+                      borderRadius: 8,
+                      background: "#FBF1EE",
+                      border: "1px solid #EBD3CC",
+                    }}
+                  >
+                    {currentTypeConfig.autoDeduction != null && (
+                      <div
+                        style={{
+                          fontSize: 12.5,
+                          color: colors.red,
+                          fontWeight: 700,
+                          marginBottom: 8,
+                        }}
+                      >
+                        自动扣 {currentTypeConfig.autoDeduction} 分
+                      </div>
+                    )}
+                    {currentTypeConfig.autoDeduction == null &&
+                      (currentTypeConfig.minDeduction != null ||
+                        currentTypeConfig.maxDeduction != null) && (
+                        <div
+                          style={{
+                            fontSize: 12,
+                            color: colors.sub,
+                            marginBottom: 8,
+                          }}
+                        >
+                          扣分范围：{currentTypeConfig.minDeduction ?? 1} -{" "}
+                          {currentTypeConfig.maxDeduction ?? "∞"} 分
+                        </div>
+                      )}
+                    <input
+                      value={form.note}
+                      onChange={(e) => setForm({ ...form, note: e.target.value })}
+                      placeholder={
+                        form.type === "violation" ? "违规情况说明（必填）" : "情况说明（必填）"
+                      }
+                      style={{
+                        width: "100%",
+                        padding: "8px 10px",
+                        borderRadius: 8,
+                        border: `1px solid ${colors.border}`,
+                        fontSize: 13.5,
+                        marginBottom: 8,
+                        boxSizing: "border-box",
+                      }}
+                    />
+                    <div style={{ display: "flex", gap: 8 }}>
+                      {currentTypeConfig.autoDeduction == null && (
+                        <input
+                          type="number"
+                          value={form.deduction}
+                          onChange={(e) => setForm({ ...form, deduction: e.target.value })}
+                          placeholder="扣分（分）"
+                          style={{
+                            flex: 1,
+                            padding: "8px 10px",
+                            borderRadius: 8,
+                            border: `1px solid ${colors.border}`,
+                            fontSize: 13.5,
+                            boxSizing: "border-box",
+                          }}
+                        />
+                      )}
+                      <input
+                        type="number"
+                        value={form.fine}
+                        onChange={(e) => setForm({ ...form, fine: e.target.value })}
+                        placeholder="罚款金额（选填）"
+                        style={{
+                          flex: 1,
+                          padding: "8px 10px",
+                          borderRadius: 8,
+                          border: `1px solid ${colors.border}`,
+                          fontSize: 13.5,
+                          boxSizing: "border-box",
+                        }}
+                      />
+                    </div>
+                  </div>
+                )}
+
+                {error && (
+                  <div style={{ color: colors.red, fontSize: 12.5, marginTop: 8 }}>{error}</div>
+                )}
+
+                <button
+                  onClick={addLog}
+                  style={{
+                    marginTop: 12,
+                    padding: "9px 16px",
+                    borderRadius: 8,
+                    border: "none",
+                    background: colors.navy,
+                    color: "#fff",
+                    fontSize: 14,
+                    cursor: "pointer",
+                  }}
+                >
+                  保存记录
+                </button>
+              </div>
+
+              {/* Timeline */}
+              {selectedLogs.length === 0 ? (
+                <div style={{ color: colors.sub, fontSize: 13.5, padding: "10px 2px" }}>
+                  还没有记录，添加第一条工作日志吧。
+                </div>
+              ) : (
+                <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
+                  {selectedLogs.map((l) =>
+                    editingLogId === l.id ? (
+                      <div
+                        key={l.id}
+                        style={{
+                          background: colors.card,
+                          border: `1px solid ${colors.navy}`,
+                          borderRadius: 10,
+                          padding: "12px 14px",
+                        }}
+                      >
+                        <div style={{ display: "flex", gap: 10, marginBottom: 10, flexWrap: "wrap" }}>
+                          <input
+                            type="date"
+                            value={editLogForm.date}
+                            onChange={(e) =>
+                              setEditLogForm({ ...editLogForm, date: e.target.value })
+                            }
+                            style={{
+                              padding: "8px 10px",
+                              borderRadius: 8,
+                              border: `1px solid ${colors.border}`,
+                              fontSize: 13.5,
+                            }}
+                          />
+                        </div>
+
+                        <div style={{ display: "flex", gap: 6, marginBottom: 10, flexWrap: "wrap" }}>
+                          {LOG_TYPES.map((t) => {
+                            const active = editLogForm.type === t.key;
+                            return (
+                              <button
+                                key={t.key}
+                                type="button"
+                                onClick={() => {
+                                  const cfg = logTypeConfig(t.key);
+                                  setEditLogForm((f) => ({
+                                    ...f,
+                                    type: t.key,
+                                    deduction:
+                                      cfg.autoDeduction != null
+                                        ? String(cfg.autoDeduction)
+                                        : f.type === t.key
+                                        ? f.deduction
+                                        : t.key === "violation"
+                                        ? "10"
+                                        : "",
+                                  }));
+                                }}
+                                style={{
+                                  padding: "6px 11px",
+                                  borderRadius: 999,
+                                  border: `1px solid ${active ? colors.navy : colors.border}`,
+                                  background: active ? colors.navy : colors.card,
+                                  color: active ? "#fff" : colors.sub,
+                                  fontSize: 12.5,
+                                  cursor: "pointer",
+                                  whiteSpace: "nowrap",
+                                }}
+                              >
+                                {t.label}
+                                {t.autoDeduction != null ? ` -${t.autoDeduction}分` : ""}
+                              </button>
+                            );
+                          })}
+                        </div>
+
+                        <textarea
+                          value={editLogForm.work}
+                          onChange={(e) =>
+                            setEditLogForm({ ...editLogForm, work: e.target.value })
+                          }
+                          placeholder={
+                            editLogForm.type === "normal"
+                              ? "工作内容…"
+                              : `工作内容（选填，留空记为「${logTypeConfig(editLogForm.type).label}」）`
+                          }
+                          style={{
+                            width: "100%",
+                            minHeight: 60,
+                            padding: "8px 10px",
+                            borderRadius: 8,
+                            border: `1px solid ${colors.border}`,
+                            fontSize: 13.5,
+                            marginBottom: 8,
+                            boxSizing: "border-box",
+                            resize: "vertical",
+                            fontFamily: "'Noto Sans SC', sans-serif",
+                          }}
+                        />
+
+                        {editLogForm.type !== "normal" && (
+                          <div
+                            style={{
+                              padding: 10,
+                              borderRadius: 8,
+                              background: "#FBF1EE",
+                              border: "1px solid #EBD3CC",
+                              marginBottom: 8,
+                            }}
+                          >
+                            <input
+                              value={editLogForm.note}
+                              onChange={(e) =>
+                                setEditLogForm({ ...editLogForm, note: e.target.value })
+                              }
+                              placeholder={
+                                editLogForm.type === "violation" ? "违规情况说明（必填）" : "情况说明（必填）"
+                              }
+                              style={{
+                                width: "100%",
+                                padding: "8px 10px",
+                                borderRadius: 8,
+                                border: `1px solid ${colors.border}`,
+                                fontSize: 13.5,
+                                marginBottom: 8,
+                                boxSizing: "border-box",
+                              }}
+                            />
+                            <div style={{ display: "flex", gap: 8 }}>
+                              {logTypeConfig(editLogForm.type).autoDeduction == null && (
+                                <input
+                                  type="number"
+                                  value={editLogForm.deduction}
+                                  onChange={(e) =>
+                                    setEditLogForm({ ...editLogForm, deduction: e.target.value })
+                                  }
+                                  placeholder="扣分（分）"
+                                  style={{
+                                    flex: 1,
+                                    padding: "8px 10px",
+                                    borderRadius: 8,
+                                    border: `1px solid ${colors.border}`,
+                                    fontSize: 13.5,
+                                    boxSizing: "border-box",
+                                  }}
+                                />
+                              )}
+                              <input
+                                type="number"
+                                value={editLogForm.fine}
+                                onChange={(e) =>
+                                  setEditLogForm({ ...editLogForm, fine: e.target.value })
+                                }
+                                placeholder="罚款金额（选填）"
+                                style={{
+                                  flex: 1,
+                                  padding: "8px 10px",
+                                  borderRadius: 8,
+                                  border: `1px solid ${colors.border}`,
+                                  fontSize: 13.5,
+                                  boxSizing: "border-box",
+                                }}
+                              />
+                            </div>
+                          </div>
+                        )}
+
+                        {error && (
+                          <div style={{ color: colors.red, fontSize: 12.5, marginBottom: 8 }}>
+                            {error}
+                          </div>
+                        )}
+
+                        <div style={{ display: "flex", gap: 6 }}>
+                          <button
+                            onClick={saveEditLog}
+                            style={{
+                              padding: "7px 14px",
+                              borderRadius: 8,
+                              border: "none",
+                              background: colors.navy,
+                              color: "#fff",
+                              fontSize: 13,
+                              cursor: "pointer",
+                            }}
+                          >
+                            保存
+                          </button>
+                          <button
+                            onClick={() => {
+                              cancelEditLog();
+                              setError("");
+                            }}
+                            style={{
+                              padding: "7px 14px",
+                              borderRadius: 8,
+                              border: `1px solid ${colors.border}`,
+                              background: colors.card,
+                              color: colors.sub,
+                              fontSize: 13,
+                              cursor: "pointer",
+                            }}
+                          >
+                            取消
+                          </button>
+                        </div>
+                      </div>
+                    ) : (
+                      <div
+                        key={l.id}
+                        style={{
+                          background: colors.card,
+                          border: `1px solid ${l.violation ? "#EBD3CC" : colors.border}`,
+                          borderRadius: 10,
+                          padding: "12px 14px",
+                          display: "flex",
+                          gap: 12,
+                          alignItems: "flex-start",
+                        }}
+                      >
+                        {l.violation ? (
+                          <Stamp label={stampLabelFor(l)} />
+                        ) : (
+                          <span
+                            style={{
+                              color: colors.green,
+                              fontSize: 13,
+                              fontWeight: 700,
+                              border: `1px solid ${colors.green}`,
+                              borderRadius: "50%",
+                              width: 38,
+                              height: 38,
+                              display: "flex",
+                              alignItems: "center",
+                              justifyContent: "center",
+                              flexShrink: 0,
+                            }}
+                          >
+                            ✓
+                          </span>
+                        )}
+                        <div style={{ flex: 1, minWidth: 0 }}>
+                          <div
+                            style={{
+                              display: "flex",
+                              justifyContent: "space-between",
+                              gap: 8,
+                            }}
+                          >
+                            <span style={{ fontSize: 12.5, color: colors.sub, fontWeight: 600 }}>
+                              {fmtDate(l.date)}
+                            </span>
+                            <div style={{ display: "flex", gap: 10, flexShrink: 0 }}>
+                              <button
+                                onClick={() => {
+                                  setError("");
+                                  startEditLog(l);
+                                }}
+                                style={{
+                                  border: "none",
+                                  background: "transparent",
+                                  color: colors.sub,
+                                  cursor: "pointer",
+                                  fontSize: 12.5,
+                                }}
+                                aria-label="编辑记录"
+                              >
+                                编辑
+                              </button>
+                              <button
+                                onClick={() => removeLog(l.id)}
+                                style={{
+                                  border: "none",
+                                  background: "transparent",
+                                  color: colors.sub,
+                                  cursor: "pointer",
+                                  fontSize: 15,
+                                }}
+                                aria-label="删除记录"
+                              >
+                                ×
+                              </button>
+                            </div>
+                          </div>
+                          <div style={{ fontSize: 14, marginTop: 4, lineHeight: 1.5 }}>{l.work}</div>
+                          {l.violation && (
+                            <div style={{ marginTop: 6, fontSize: 13, color: colors.red }}>
+                              {l.note && <span>{l.note}</span>}
+                              {l.deduction > 0 && (
+                                <span style={{ marginLeft: l.note ? 8 : 0, fontWeight: 700 }}>
+                                  -{l.deduction}分
+                                </span>
+                              )}
+                              {l.fine > 0 && (
+                                <span style={{ marginLeft: 8, fontWeight: 700 }}>
+                                  罚款 {fmtMoney(l.fine)}
+                                </span>
+                              )}
+                            </div>
+                          )}
+                        </div>
+                      </div>
+                    )
+                  )}
+                </div>
+              )}
+            </>
+          )}
+        </div>
+      </div>
+
+
+      {bonusReportOpen &&
+        (() => {
+          const data = bonusReportData(bonusReportMonth, bonusPoolAmount, bonusSelectedIds);
+          const { rows: vRows, totalViolations, totalFine, totalDeduction } = violationReportRows(
+            bonusReportMonth,
+            bonusSelectedIds
+          );
+          const changeRows = personnelChangeRows(bonusReportMonth);
+          return (
+            <div
+              onClick={() => setBonusReportOpen(false)}
+              style={{
+                position: "fixed",
+                inset: 0,
+                background: "rgba(20,20,18,0.5)",
+                display: "flex",
+                alignItems: "center",
+                justifyContent: "center",
+                padding: 16,
+                zIndex: 100,
+              }}
+            >
+              <div
+                onClick={(e) => e.stopPropagation()}
+                style={{
+                  background: colors.card,
+                  borderRadius: 14,
+                  width: "100%",
+                  maxWidth: 560,
+                  maxHeight: "88vh",
+                  overflowY: "auto",
+                  boxShadow: "0 12px 40px rgba(0,0,0,0.25)",
+                }}
+              >
+                <div
+                  style={{
+                    display: "flex",
+                    alignItems: "center",
+                    gap: 8,
+                    flexWrap: "wrap",
+                    padding: 14,
+                    borderBottom: `1px solid ${colors.border}`,
+                  }}
+                >
+                  <input
+                    type="month"
+                    value={bonusReportMonth}
+                    onChange={(e) => setBonusReportMonth(e.target.value)}
+                    style={{
+                      padding: "7px 9px",
+                      borderRadius: 7,
+                      border: `1px solid ${colors.border}`,
+                      fontSize: 13,
+                    }}
+                  />
+                  <input
+                    type="number"
+                    value={bonusPoolAmount}
+                    onChange={(e) => setBonusPoolAmount(e.target.value)}
+                    placeholder="奖金池总额（RM）"
+                    style={{
+                      padding: "7px 9px",
+                      borderRadius: 7,
+                      border: `1px solid ${colors.border}`,
+                      fontSize: 13,
+                      width: 140,
+                    }}
+                  />
+                  <button
+                    onClick={printEmployeeReviewReport}
+                    style={{
+                      padding: "7px 11px",
+                      borderRadius: 7,
+                      border: "none",
+                      background: colors.navy,
+                      color: "#fff",
+                      fontSize: 12.5,
+                      cursor: "pointer",
+                    }}
+                  >
+                    导出 PDF
+                  </button>
+                  <button
+                    onClick={exportEmployeeReviewReportText}
+                    style={{
+                      padding: "7px 11px",
+                      borderRadius: 7,
+                      border: `1px solid ${colors.border}`,
+                      background: colors.card,
+                      color: colors.text,
+                      fontSize: 12.5,
+                      cursor: "pointer",
+                    }}
+                  >
+                    下载文本
+                  </button>
+                  <button
+                    onClick={exportEmployeeReviewReportXLSX}
+                    title="下载 Excel（.xlsx），可直接导入 Google Sheets"
+                    style={{
+                      padding: "7px 11px",
+                      borderRadius: 7,
+                      border: `1px solid ${colors.border}`,
+                      background: colors.card,
+                      color: colors.text,
+                      fontSize: 12.5,
+                      cursor: "pointer",
+                    }}
+                  >
+                    导出 Excel（.xlsx）
+                  </button>
+                  <button
+                    onClick={() => setBonusReportOpen(false)}
+                    style={{
+                      marginLeft: "auto",
+                      border: "none",
+                      background: "transparent",
+                      color: colors.sub,
+                      fontSize: 18,
+                      cursor: "pointer",
+                      lineHeight: 1,
+                    }}
+                    aria-label="关闭"
+                  >
+                    ×
+                  </button>
+                </div>
+
+                {/* Employee picker — hidden when printing */}
+                <div className="no-print" style={{ padding: "12px 16px 4px" }}>
+                  <div
+                    style={{
+                      display: "flex",
+                      justifyContent: "space-between",
+                      alignItems: "center",
+                      marginBottom: 8,
+                    }}
+                  >
+                    <div style={{ fontSize: 12.5, color: colors.sub }}>
+                      已选 {bonusSelectedIds.length} / {employees.length} 位员工参与分配
+                    </div>
+                    <div style={{ display: "flex", gap: 8 }}>
+                      <button
+                        onClick={() => setBonusSelectedIds(employees.map((e) => e.id))}
+                        style={{
+                          border: "none",
+                          background: "transparent",
+                          color: colors.navy,
+                          fontSize: 12,
+                          cursor: "pointer",
+                          padding: 0,
+                        }}
+                      >
+                        全选
+                      </button>
+                      <button
+                        onClick={() => setBonusSelectedIds([])}
+                        style={{
+                          border: "none",
+                          background: "transparent",
+                          color: colors.sub,
+                          fontSize: 12,
+                          cursor: "pointer",
+                          padding: 0,
+                        }}
+                      >
+                        清空
+                      </button>
+                    </div>
+                  </div>
+                  <div
+                    style={{
+                      display: "flex",
+                      flexDirection: "column",
+                      gap: 4,
+                      maxHeight: 180,
+                      overflowY: "auto",
+                      border: `1px solid ${colors.border}`,
+                      borderRadius: 8,
+                      padding: 6,
+                      marginBottom: 10,
+                    }}
+                  >
+                    {employees.length === 0 ? (
+                      <div style={{ fontSize: 12.5, color: colors.sub, padding: 6 }}>暂无员工</div>
+                    ) : (
+                      sortEmployeesByRole(employees).map((emp) => (
+                        <label
+                          key={emp.id}
+                          style={{
+                            display: "flex",
+                            alignItems: "center",
+                            gap: 8,
+                            padding: "6px 8px",
+                            borderRadius: 6,
+                            cursor: "pointer",
+                            fontSize: 13,
+                            background: bonusSelectedIds.includes(emp.id) ? "#EDF0F3" : "transparent",
+                          }}
+                        >
+                          <input
+                            type="checkbox"
+                            checked={bonusSelectedIds.includes(emp.id)}
+                            onChange={() => toggleBonusSelected(emp.id)}
+                          />
+                          <span>
+                            {emp.name}
+                            {emp.role && (
+                              <span style={{ color: colors.sub, marginLeft: 6, fontSize: 11.5 }}>
+                                {emp.role}
+                              </span>
+                            )}
+                          </span>
+                        </label>
+                      ))
+                    )}
+                  </div>
+                </div>
+
+                <div style={{ padding: "4px 20px 20px" }}>
+                  <div style={{ textAlign: "center", marginBottom: 16 }}>
+                    <div
+                      style={{
+                        fontFamily: "'Noto Serif SC', serif",
+                        fontWeight: 900,
+                        fontSize: 18,
+                        color: colors.text,
+                      }}
+                    >
+                      员工审核报告
+                    </div>
+                    <div style={{ fontSize: 12, color: colors.sub, marginTop: 2 }}>
+                      {monthLabel(bonusReportMonth)}
+                    </div>
+                  </div>
+
+                  <div style={{ fontSize: 13, fontWeight: 700, marginBottom: 8 }}>
+                    违规记录明细（共 {totalViolations} 条）
+                  </div>
+                  {vRows.length === 0 ? (
+                    <div style={{ fontSize: 12.5, color: colors.sub, marginBottom: 14 }}>
+                      本月无违规记录
+                    </div>
+                  ) : (
+                    <div style={{ display: "flex", flexDirection: "column", marginBottom: 14 }}>
+                      <div
+                        style={{
+                          display: "flex",
+                          flexWrap: "wrap",
+                          gap: 8,
+                          fontSize: 11,
+                          color: colors.sub,
+                          paddingBottom: 6,
+                          borderBottom: `1px solid ${colors.border}`,
+                        }}
+                      >
+                        <div style={{ flex: "1 1 64px", textAlign: "center" }}>日期</div>
+                        <div style={{ flex: "2 1 140px", textAlign: "center" }}>扣分原因</div>
+                        <div style={{ flex: "1 1 56px", textAlign: "center" }}>扣分</div>
+                        <div style={{ flex: "1 1 64px", textAlign: "center" }}>罚款</div>
+                      </div>
+                      {vRows.map((r) => (
+                        <div
+                          key={r.id}
+                          style={{
+                            padding: "8px 0",
+                            borderBottom: `1px dashed ${colors.border}`,
+                          }}
+                        >
+                          <div style={{ fontWeight: 700, color: colors.red, fontSize: 12.5, marginBottom: 4 }}>
+                            {r.empName}
+                          </div>
+                          <div style={{ display: "flex", flexWrap: "wrap", gap: 8, fontSize: 12.5 }}>
+                            <div style={{ flex: "1 1 64px", textAlign: "center", color: colors.sub }}>
+                              {fmtDate(r.date)}
+                            </div>
+                            <div style={{ flex: "2 1 140px", textAlign: "center" }}>
+                              {r.label}
+                              {r.note ? `：${r.note}` : ""}
+                            </div>
+                            <div style={{ flex: "1 1 56px", textAlign: "center", fontWeight: 700, color: colors.red }}>
+                              {r.deduction > 0 ? `-${r.deduction}分` : "—"}
+                            </div>
+                            <div style={{ flex: "1 1 64px", textAlign: "center", fontWeight: 700, color: colors.red }}>
+                              {fmtMoney(r.fine)}
+                            </div>
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                  )}
+
+                  <div
+                    style={{
+                      display: "flex",
+                      gap: 18,
+                      flexWrap: "wrap",
+                      paddingTop: 12,
+                      paddingBottom: 14,
+                      borderTop: `1px solid ${colors.border}`,
+                      borderBottom: `1px solid ${colors.border}`,
+                      marginBottom: 14,
+                    }}
+                  >
+                    <div>
+                      <div style={{ fontSize: 11, color: colors.sub }}>本月总违规次数</div>
+                      <div
+                        style={{
+                          fontSize: 18,
+                          fontWeight: 900,
+                          fontFamily: "'Noto Serif SC', serif",
+                          color: colors.red,
+                        }}
+                      >
+                        {totalViolations}
+                      </div>
+                    </div>
+                    <div>
+                      <div style={{ fontSize: 11, color: colors.sub }}>扣除信用分总计</div>
+                      <div
+                        style={{
+                          fontSize: 18,
+                          fontWeight: 900,
+                          fontFamily: "'Noto Serif SC', serif",
+                          color: colors.red,
+                        }}
+                      >
+                        -{totalDeduction}分
+                      </div>
+                    </div>
+                    <div>
+                      <div style={{ fontSize: 11, color: colors.sub }}>罚款总金额</div>
+                      <div
+                        style={{
+                          fontSize: 18,
+                          fontWeight: 900,
+                          fontFamily: "'Noto Serif SC', serif",
+                          color: colors.red,
+                        }}
+                      >
+                        {fmtMoney(totalFine)}
+                      </div>
+                    </div>
+                  </div>
+
+                  <div style={{ fontSize: 13, fontWeight: 700, marginBottom: 8 }}>
+                    本月人员变动（共 {changeRows.length} 人）
+                  </div>
+                  {changeRows.length === 0 ? (
+                    <div style={{ fontSize: 12.5, color: colors.sub, marginBottom: 14 }}>
+                      本月无人员变动
+                    </div>
+                  ) : (
+                    <div style={{ display: "flex", flexDirection: "column", marginBottom: 14 }}>
+                      <div
+                        style={{
+                          display: "flex",
+                          flexWrap: "wrap",
+                          gap: 8,
+                          fontSize: 11,
+                          color: colors.sub,
+                          paddingBottom: 6,
+                          borderBottom: `1px solid ${colors.border}`,
+                        }}
+                      >
+                        <div style={{ flex: "1 1 100px", textAlign: "center" }}>姓名</div>
+                        <div style={{ flex: "1 1 70px", textAlign: "center" }}>类型</div>
+                        <div style={{ flex: "1 1 70px", textAlign: "center" }}>日期</div>
+                      </div>
+                      {changeRows.map((r) => (
+                        <div
+                          key={r.id}
+                          style={{
+                            display: "flex",
+                            flexWrap: "wrap",
+                            gap: 8,
+                            fontSize: 12.5,
+                            padding: "7px 0",
+                            borderBottom: `1px dashed ${colors.border}`,
+                          }}
+                        >
+                          <div
+                            style={{
+                              flex: "1 1 100px",
+                              textAlign: "center",
+                              fontWeight: 700,
+                              color: r.reason === "劝退" ? colors.red : colors.text,
+                            }}
+                          >
+                            {r.name}
+                          </div>
+                          <div
+                            style={{
+                              flex: "1 1 70px",
+                              textAlign: "center",
+                              fontWeight: 700,
+                              color: r.reason === "劝退" ? colors.red : colors.sub,
+                            }}
+                          >
+                            {r.reason}
+                          </div>
+                          <div style={{ flex: "1 1 70px", textAlign: "center", color: colors.sub }}>
+                            {fmtDate(r.date)}
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                  )}
+
+                  <div style={{ fontSize: 13, fontWeight: 700, marginBottom: 8 }}>
+                    奖金分配明细（共 {data.n} 人）
+                  </div>
+                  {data.rows.length === 0 ? (
+                    <div style={{ fontSize: 12.5, color: colors.sub, marginBottom: 14 }}>
+                      没有参与分配的员工
+                    </div>
+                  ) : (
+                    <div style={{ display: "flex", flexDirection: "column", marginBottom: 14 }}>
+                      <div
+                        style={{
+                          display: "flex",
+                          justifyContent: "space-between",
+                          gap: 10,
+                          fontSize: 11,
+                          color: colors.sub,
+                          padding: "0 0 6px",
+                          borderBottom: `1px solid ${colors.border}`,
+                        }}
+                      >
+                        <div>姓名 · 入职日期</div>
+                        <div>分红巴仙数</div>
+                      </div>
+                      {data.rows.map((r) => (
+                        <div
+                          key={r.empId}
+                          style={{
+                            display: "flex",
+                            justifyContent: "space-between",
+                            alignItems: "center",
+                            gap: 10,
+                            fontSize: 13,
+                            padding: "9px 0",
+                            borderBottom: `1px dashed ${colors.border}`,
+                          }}
+                        >
+                          <div style={{ minWidth: 0 }}>
+                            <span
+                              style={{
+                                fontWeight: 700,
+                                color: r.isNewHire ? colors.deepBlue : colors.text,
+                              }}
+                            >
+                              {r.empName}
+                            </span>
+                            <span style={{ color: colors.sub, marginLeft: 8, fontSize: 11.5 }}>
+                              {r.joinDate ? fmtJoinDate(r.joinDate) : "入职日期未填写"}
+                            </span>
+                          </div>
+                          <div
+                            style={{
+                              fontWeight: 700,
+                              color: r.deducted ? colors.red : colors.cyan,
+                              flexShrink: 0,
+                            }}
+                          >
+                            {bonusPercentLabel(r.tier)}
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                  )}
+
+                  <div
+                    style={{
+                      display: "flex",
+                      gap: 18,
+                      flexWrap: "wrap",
+                      paddingTop: 12,
+                      borderTop: `1px solid ${colors.border}`,
+                    }}
+                  >
+                    <div>
+                      <div style={{ fontSize: 11, color: colors.sub }}>奖金池总额</div>
+                      <div
+                        style={{
+                          fontSize: 18,
+                          fontWeight: 900,
+                          fontFamily: "'Noto Serif SC', serif",
+                          color: colors.text,
+                        }}
+                      >
+                        {fmtMoney(data.pool)}
+                      </div>
+                    </div>
+                    <div>
+                      <div style={{ fontSize: 11, color: colors.sub }}>人均基数（Bbase）</div>
+                      <div
+                        style={{
+                          fontSize: 18,
+                          fontWeight: 900,
+                          fontFamily: "'Noto Serif SC', serif",
+                          color: colors.text,
+                        }}
+                      >
+                        {fmtMoney(data.bBase)}
+                      </div>
+                    </div>
+                    <div>
+                      <div style={{ fontSize: 11, color: colors.sub }}>优秀员工（≥90分）</div>
+                      <div
+                        style={{
+                          fontSize: 18,
+                          fontWeight: 900,
+                          fontFamily: "'Noto Serif SC', serif",
+                          color: colors.text,
+                        }}
+                      >
+                        {data.excellentCount} 人
+                      </div>
+                    </div>
+                    <div>
+                      <div style={{ fontSize: 11, color: colors.sub }}>奖金池余额（R）</div>
+                      <div
+                        style={{
+                          fontSize: 18,
+                          fontWeight: 900,
+                          fontFamily: "'Noto Serif SC', serif",
+                          color: colors.text,
+                        }}
+                      >
+                        {fmtMoney(data.remainder)}
+                      </div>
+                    </div>
+                  </div>
+
+                  <div style={{ marginTop: 18, fontSize: 10.5, color: colors.sub, textAlign: "center" }}>
+                    生成日期：{fmtJoinDate(todayStr())}
+                  </div>
+                </div>
+              </div>
+            </div>
+          );
+        })()}
+
+      {textPreview.open && (
+        <div
+          onClick={() => setTextPreview({ open: false, title: "", text: "" })}
+          style={{
+            position: "fixed",
+            inset: 0,
+            background: "rgba(20,20,18,0.5)",
+            display: "flex",
+            alignItems: "center",
+            justifyContent: "center",
+            padding: 16,
+            zIndex: 110,
+          }}
+        >
+          <div
+            onClick={(e) => e.stopPropagation()}
+            style={{
+              background: colors.card,
+              borderRadius: 14,
+              width: "100%",
+              maxWidth: 520,
+              maxHeight: "85vh",
+              display: "flex",
+              flexDirection: "column",
+              boxShadow: "0 12px 40px rgba(0,0,0,0.25)",
+            }}
+          >
+            <div
+              style={{
+                display: "flex",
+                alignItems: "center",
+                gap: 8,
+                padding: 14,
+                borderBottom: `1px solid ${colors.border}`,
+              }}
+            >
+              <div style={{ fontSize: 13, fontWeight: 700, flex: 1, minWidth: 0 }}>
+                {textPreview.title}
+              </div>
+              <button
+                onClick={() => copyTextToClipboard(textPreview.text)}
+                style={{
+                  padding: "6px 11px",
+                  borderRadius: 7,
+                  border: "none",
+                  background: colors.navy,
+                  color: "#fff",
+                  fontSize: 12.5,
+                  cursor: "pointer",
+                  flexShrink: 0,
+                }}
+              >
+                复制文本
+              </button>
+              <button
+                onClick={() => setTextPreview({ open: false, title: "", text: "" })}
+                style={{
+                  border: "none",
+                  background: "transparent",
+                  color: colors.sub,
+                  fontSize: 18,
+                  cursor: "pointer",
+                  lineHeight: 1,
+                  flexShrink: 0,
+                }}
+                aria-label="关闭"
+              >
+                ×
+              </button>
+            </div>
+            <div style={{ fontSize: 11.5, color: colors.sub, padding: "10px 14px 0" }}>
+              若自动下载没有反应，可点击上方「复制文本」，或在下方文本框内全选（Ctrl/Cmd+A）复制。
+            </div>
+            <div
+              style={{
+                flex: 1,
+                margin: 14,
+                marginTop: 8,
+                padding: 10,
+                borderRadius: 8,
+                border: `1px solid ${colors.border}`,
+                fontSize: 12.5,
+                lineHeight: 1.6,
+                fontFamily: "'Noto Sans SC', sans-serif",
+                overflow: "auto",
+                minHeight: 220,
+                maxHeight: "40vh",
+                boxSizing: "border-box",
+                whiteSpace: "pre-wrap",
+                wordBreak: "break-word",
+              }}
+            >
+              {textPreview.text.split("\n").map((line, i) => {
+                const isNameLine =
+                  line.startsWith("姓名：") &&
+                  (textPreview.redNames || []).some((n) => line.startsWith(`姓名：${n}`));
+                return (
+                  <div
+                    key={i}
+                    style={{
+                      color: isNameLine ? colors.red : colors.text,
+                      fontWeight: isNameLine ? 700 : 400,
+                    }}
+                  >
+                    {line || "\u00A0"}
+                  </div>
+                );
+              })}
+            </div>
+            <textarea
+              readOnly
+              value={textPreview.text}
+              onFocus={(e) => e.target.select()}
+              style={{
+                margin: 14,
+                marginTop: 0,
+                padding: 10,
+                borderRadius: 8,
+                border: `1px solid ${colors.border}`,
+                fontSize: 12.5,
+                lineHeight: 1.6,
+                fontFamily: "'Noto Sans SC', sans-serif",
+                resize: "vertical",
+                minHeight: 90,
+                boxSizing: "border-box",
+              }}
+            />
+          </div>
+        </div>
+      )}
+
+      {auditOpen && (
+        <div
+          onClick={() => setAuditOpen(false)}
+          style={{
+            position: "fixed",
+            inset: 0,
+            background: "rgba(20,20,18,0.5)",
+            display: "flex",
+            alignItems: "center",
+            justifyContent: "center",
+            padding: 16,
+            zIndex: 100,
+          }}
+        >
+          <div
+            onClick={(e) => e.stopPropagation()}
+            style={{
+              background: colors.card,
+              borderRadius: 14,
+              width: "100%",
+              maxWidth: 480,
+              maxHeight: "88vh",
+              overflowY: "auto",
+              boxShadow: "0 12px 40px rgba(0,0,0,0.25)",
+            }}
+          >
+            <div
+              style={{
+                display: "flex",
+                alignItems: "center",
+                justifyContent: "space-between",
+                gap: 8,
+                padding: 14,
+                borderBottom: `1px solid ${colors.border}`,
+                position: "sticky",
+                top: 0,
+                background: colors.card,
+              }}
+            >
+              <div style={{ fontWeight: 700, fontSize: 15 }}>
+                操作记录{auditLog.length > 0 ? `（共 ${auditLog.length} 条）` : ""}
+              </div>
+              <button
+                onClick={() => setAuditOpen(false)}
+                style={{
+                  border: "none",
+                  background: "transparent",
+                  fontSize: 18,
+                  color: colors.sub,
+                  cursor: "pointer",
+                  lineHeight: 1,
+                  padding: 4,
+                }}
+              >
+                ×
+              </button>
+            </div>
+            <div style={{ padding: "4px 14px 14px" }}>
+              {auditLog.length === 0 ? (
+                <div style={{ fontSize: 12.5, color: colors.sub, padding: "16px 0" }}>
+                  暂无操作记录
+                </div>
+              ) : (
+                auditLog.map((a) => (
+                  <div
+                    key={a.id}
+                    style={{
+                      padding: "10px 0",
+                      borderBottom: `1px dashed ${colors.border}`,
+                    }}
+                  >
+                    <div
+                      style={{
+                        display: "flex",
+                        justifyContent: "space-between",
+                        gap: 8,
+                        fontSize: 12,
+                        color: colors.sub,
+                        marginBottom: 3,
+                      }}
+                    >
+                      <span>
+                        <span style={{ fontWeight: 700, color: colors.navy }}>{a.actor}</span>
+                        {"　"}
+                        {a.action}
+                      </span>
+                      <span style={{ flexShrink: 0 }}>{fmtDateTime(a.at)}</span>
+                    </div>
+                    {a.detail && (
+                      <div style={{ fontSize: 12.5, color: colors.text }}>{a.detail}</div>
+                    )}
+                  </div>
+                ))
+              )}
+            </div>
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
+const root = ReactDOM.createRoot(document.getElementById('root'));
+root.render(React.createElement(EmployeeLedger));
+</script>
+</body>
+</html>
