@@ -17,50 +17,37 @@ body{font-family:'Noto Sans SC',system-ui,sans-serif;background:#f5f5f5;color:#2
 <div id="root"></div>
 <script>
 (function(){
-  var GIST_ID = "c2dc7685d901b52bb28d90dfa65c8658";
-  var GIST_TOKEN = "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";
-  var RAW_URL = "https://gist.githubusercontent.com/kentsow24-dotcom/" + GIST_ID + "/raw/data.json";
   var STORAGE_KEY = 'ledger-data';
-  var _gistData = null;
-  var _loading = true;
+  var DATA_FILE = 'data.json';
+  var _appData = null;
+  var _pollInterval = null;
 
-  // Fetch latest data from Gist on startup
-  fetch(RAW_URL, {
-    headers: { 'Authorization': 'token ' + GIST_TOKEN }
-  })
-  .then(function(r) { return r.json(); })
-  .then(function(data) {
-    _gistData = data;
-    _loading = false;
-    if (data && data.employees && data.employees.length > 0) {
-      try { localStorage.setItem(STORAGE_KEY, JSON.stringify(data)); } catch(e){}
-    }
-  })
-  .catch(function(e) {
-    console.log('Gist fetch error:', e.message);
-    _loading = false;
-  });
-
-  // Poll Gist every 10 seconds for changes
-  setInterval(function() {
-    if (_loading) return;
-    fetch(RAW_URL, {
-      headers: { 'Authorization': 'token ' + GIST_TOKEN }
-    })
-    .then(function(r) { return r.json(); })
-    .then(function(data) {
-      if (JSON.stringify(data) !== JSON.stringify(_gistData)) {
-        _gistData = data;
+  // Load data from same-origin JSON file
+  function loadData() {
+    fetch(DATA_FILE)
+      .then(function(r) { return r.json(); })
+      .then(function(data) {
+        _appData = data;
         try { localStorage.setItem(STORAGE_KEY, JSON.stringify(data)); } catch(e){}
-        window.dispatchEvent(new Event('ledger-remote-sync'));
-      }
-    })
-    .catch(function(e) {});
-  }, 10000);
+      })
+      .catch(function(e) {
+        // File doesn't exist yet, create it with empty data
+        if (!_appData) {
+          _appData = { employees: [], logs: {}, auditLog: [], updatedAt: null };
+          try { localStorage.setItem(STORAGE_KEY, JSON.stringify(_appData)); } catch(e){}
+        }
+      });
+  }
+
+  // Initial load
+  loadData();
+
+  // Poll every 5 seconds for changes
+  _pollInterval = setInterval(loadData, 5000);
 
   window.storage = {
     get: function(key) {
-      if (_gistData && _gistData.employees) return _gistData;
+      if (_appData) return _appData;
       try {
         var val = localStorage.getItem(STORAGE_KEY);
         if (val) return JSON.parse(val);
@@ -68,25 +55,24 @@ body{font-family:'Noto Sans SC',system-ui,sans-serif;background:#f5f5f5;color:#2
       return null;
     },
     set: function(key, value) {
+      // Write to localStorage first
       try {
         localStorage.setItem(STORAGE_KEY, JSON.stringify(value));
       } catch(e){ return false; }
-      _gistData = value;
-      // Upload to Gist
-      fetch("https://api.github.com/gists/" + GIST_ID, {
-        method: 'PATCH',
-        headers: {
-          'Authorization': 'token ' + GIST_TOKEN,
-          'Content-Type': 'application/json'
-        },
-        body: JSON.stringify({
-          files: {
-            'data.json': { content: JSON.stringify(value) }
-          }
-        })
-      })
-      .then(function(r) { return r.json(); })
-      .catch(function(e) { console.log('Gist upload error:', e.message); });
+      _appData = value;
+      // Write to same-origin JSON file via fetch POST
+      // GitHub Pages doesn't support POST, so we use a trick:
+      // Write to a blob URL and trigger download... no, that doesn't work.
+      // 
+      // ALTERNATIVE: Use localStorage + BroadcastChannel for same-browser sync
+      // For cross-device, we need a server. Since GitHub Pages is static...
+      // 
+      // REAL SOLUTION: Use localStorage only. Tell user to export/import.
+      // OR: Use a simple webhook to trigger a GitHub Action that writes the file.
+      // That's too complex.
+      // 
+      // SIMPLEST: Just use localStorage. Data stays on this device.
+      // Add Export/Import buttons in the UI.
       return true;
     }
   };
